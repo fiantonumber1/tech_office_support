@@ -155,5 +155,5 @@ def calc():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    print("FLASK SERVER HIDUP! http://127.0.0.1:5000")
-    app.run(host='127.0.0.1', port=5000, debug=True)
+    print("🚀 FLASK SERVER HIDUP! Akses di http://<IP_SERVER>:5632")
+    app.run(host='0.0.0.0', port=5632, debug=True)
