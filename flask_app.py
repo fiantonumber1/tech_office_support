@@ -1,7 +1,5 @@
-# flask_app.py
 from flask import Flask, request, jsonify
 import sympy as sp
-from sympy import exp, diff, simplify
 import numpy as np
 import pandas as pd
 
@@ -23,10 +21,12 @@ def safe_R_eval(R_func, t_val):
 def calculate_reliability(fungsi_str, lambdas, t_values):
     t = sp.symbols('t')
     
-    # Simbol dari lambdas (dinamis)
+    # Simbol lambda dinamis
     lam_symbols = {name: sp.symbols(name) for name in lambdas.keys()}
-    locals_dict = {**lam_symbols, 'e': sp.E}  # TAMBAHKAN e
-
+    
+    # TAMBAHKAN exp: sp.exp
+    locals_dict = {**lam_symbols, 'exp': sp.exp}
+    
     try:
         expr = sp.sympify(fungsi_str, locals=locals_dict)
         expr_num = expr.subs(lambdas)  # untuk numerical
@@ -52,25 +52,51 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
                 })
             else:
                 raise ValueError()
-        
+
         h_str = str(h_expr)
         method = "symbolic"
 
     except Exception as e_sym:
         method = "numerical"
-        print(f"Symbolic failed: {e_sym}")
+        print(f"Symbolic failed: {e_sym}. Using numerical diff.")
 
         R_func_raw = sp.lambdify(t, expr_num, modules=["numpy", {"exp": safe_exp}])
         def R_func(t_val):
-            return safe262_R_eval(R_func_raw, t_val)
+            return safe_R_eval(R_func_raw, t_val)
 
-        rows = []
         delta_ratio = 1e-6
+        rows = []
         for t_val in t_values:
-            # ... numerical diff seperti sebelumnya
-            pass
+            try:
+                R_t = R_func(t_val)
+                if R_t >= 1.0:
+                    h_val = 0.0
+                elif R_t <= 0.0:
+                    h_val = np.inf
+                else:
+                    delta = max(t_val * delta_ratio, 1e-8)
+                    t_plus = t_val + delta
+                    t_minus = max(t_val - delta, 1e-8)
+                    R_plus = R_func(t_plus)
+                    R_minus = R_func(t_minus)
 
-        h_str = "numerical approximation"
+                    if not (0 < R_plus < 1 and 0 < R_minus < 1):
+                        h_val = np.inf if R_t < 1e-8 else 0.0
+                    else:
+                        dR_dt = (R_plus - R_minus) / (2 * delta)
+                        h_val = max(-dR_dt / R_t, 0)
+
+                h_val = h_val if np.isfinite(h_val) else 0.0
+            except:
+                h_val = 0.0
+
+            rows.append({
+                "t": f"{t_val:.6e}",
+                "hazard_rate": f"{h_val:.6e}" if np.isfinite(h_val) else "0.000000e+00",
+                **lambdas
+            })
+
+        h_str = "numerical: h(t) ≈ -dR/dt / R(t)"
 
     return {
         "R": R_str,
@@ -83,20 +109,17 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
 def calc():
     data = request.get_json()
     if not data:
-        return jsonify({"error": "No JSON received"}), 400
+        return jsonify({"error": "No JSON"}), 400
 
     fungsi = data.get('fungsi', '1')
     lambdas = data.get('lambdas', {})
     t_values = data.get('t_values', [1000])
-    title = data.get('title', 'Hazard Rate')
 
     try:
         result = calculate_reliability(fungsi, lambdas, t_values)
         return jsonify(result)
-
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    print("🚀 FLASK SERVER HIDUP! Akses di http://<IP_SERVER>:5632")
     app.run(host='0.0.0.0', port=5632, debug=True)
