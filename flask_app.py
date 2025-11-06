@@ -123,7 +123,7 @@ def calc():
 
     fungsi = data.get('fungsi', '1')
     lambdas = data.get('lambdas', {})
-    t_values = data.get('t_values', [1000, 10000, 50000])
+    t_values = data.get('t_values', [1000])
     title = data.get('title', 'Hazard Rate')
 
     try:
