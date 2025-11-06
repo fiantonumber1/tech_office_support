@@ -3,23 +3,22 @@ import sympy as sp
 import pandas as pd
 from mpmath import mp, mpf, exp as mp_exp, nstr
 
-# Set presisi tinggi (bisa sampai 10^-1000 jika perlu)
-mp.dps = 120
+# Presisi cukup untuk 1e-8 * 1e5 = 1e-3
+mp.dps = 50
 
 app = Flask(__name__)
 
-def safe_exp_mp(x):
-    """exp(-x) dengan clip untuk stabilitas"""
-    x = mpf(x)
-    if x > 700:
-        return mpf(0)
-    return mp_exp(-x)
-
-def to_scientific_str(val, default="0.000000e+00"):
-    """Konversi mpf ke string .6e"""
-    if val == 0 or abs(val) < mpf('1e-90'):
+def to_scientific_str(val, digits=10, default="0.000000e+00"):
+    """Konversi mpf ke string .6e dengan presisi tinggi"""
+    if val == 0 or abs(val) < mpf('1e-40'):
         return default
-    return nstr(val, 7)  # 6 digit + 1 untuk pembulatan
+    s = nstr(val, digits)
+    # Pastikan format .6e
+    if 'e' in s:
+        coeff, exp = s.split('e')
+        coeff = coeff[:8]  # 1.xxxxxx
+        return f"{float(coeff):.6e}".replace('e', 'e')
+    return f"{float(s):.6e}"
 
 def calculate_reliability(fungsi_str, lambdas, t_values):
     t = sp.symbols('t')
@@ -47,7 +46,6 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
         h_expr = sp.simplify(h_expr)
         f_expr = sp.simplify(f_expr)
 
-        # Lambdify ke mpmath
         h_func = sp.lambdify(t, h_expr, modules='mpmath')
         f_func = sp.lambdify(t, f_expr, modules='mpmath')
 
@@ -56,7 +54,8 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
             try:
                 h_val = h_func(t_mp)
                 f_val = f_func(t_mp)
-            except:
+            except Exception as e:
+                print(f"Symbolic eval error at t={t_val}: {e}")
                 h_val = f_val = mpf(0)
 
             rows.append({
@@ -88,10 +87,9 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
                     h_val = mpf('inf')
                     f_val = mpf(0)
                 else:
-                    # Delta adaptif: 1e-12 dari R(t)
-                    delta = max(R_t * mpf('1e-12'), mpf('1e-100'))
+                    delta = max(R_t * mpf('1e-10'), mpf('1e-50'))
                     t_plus = t_mp + delta
-                    t_minus = t_mp - delta if t_mp > delta else mpf('1e-100')
+                    t_minus = t_mp - delta if t_mp > delta else mpf('1e-50')
 
                     R_plus = R_func(t_plus)
                     R_minus = R_func(t_minus)
@@ -101,7 +99,7 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
                     h_val = f_val / R_t if R_t > 0 else mpf('inf')
 
             except Exception as e_num:
-                print(f"Error at t={t_val}: {e_num}")
+                print(f"Numerical error at t={t_val}: {e_num}")
                 h_val = f_val = mpf(0)
 
             rows.append({
@@ -133,7 +131,6 @@ def calc():
     lambdas = data.get('lambdas', {})
     t_values = data.get('t_values', [1000])
 
-    # Validasi t_values
     try:
         t_values = [float(t) for t in t_values]
         if any(t <= 0 for t in t_values):
