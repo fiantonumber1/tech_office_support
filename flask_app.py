@@ -1,28 +1,11 @@
 from flask import Flask, request, jsonify
 import sympy as sp
 import pandas as pd
-from mpmath import mp, mpf
-
-# Presisi cukup untuk 0.0000395 * 31200 = 1.23
-mp.dps = 20
 
 app = Flask(__name__)
 
-def safe_float(val, threshold=1e-40):
-    """Konversi mpf ke float, tapi jangan jadi 0 karena underflow"""
-    if val == 0 or abs(val) < mpf(threshold):
-        return 0.0
-    try:
-        f = float(val)
-        if abs(f) < 1e-40:
-            return 0.0
-        return f
-    except:
-        return 0.0
-
 def format_scientific(val):
-    """Format float ke .6e"""
-    if val == 0:
+    if val == 0 or abs(val) < 1e-40:
         return "0.000000e+00"
     return f"{val:.6e}"
 
@@ -52,16 +35,24 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
         h_expr = sp.simplify(h_expr)
         f_expr = sp.simplify(f_expr)
 
-        h_func = sp.lambdify(t, h_expr, modules='mpmath')
-        f_func = sp.lambdify(t, f_expr, modules='mpmath')
+        # SUBSTITUSI LAMBDA DULU → baru lambdify
+        h_expr_num = h_expr.subs(lambdas)
+        f_expr_num = f_expr.subs(lambdas)
+
+        h_func = sp.lambdify(t, h_expr_num, modules='numpy')
+        f_func = sp.lambdify(t, f_expr_num, modules='numpy')
 
         for t_val in t_values:
-            t_mp = mpf(t_val)
             try:
-                h_val = safe_float(h_func(t_mp))
-                f_val = safe_float(f_func(t_mp))
+                h_val = float(h_func(t_val))
+                f_val = float(f_func(t_val))
+
+                if abs(h_val) < 1e-40:
+                    h_val = 0.0
+                if abs(f_val) < 1e-40:
+                    f_val = 0.0
             except Exception as e:
-                print(f"Error: {e}")
+                print(f"Symbolic eval error at t={t_val}: {e}")
                 h_val = f_val = 0.0
 
             rows.append({
@@ -73,37 +64,40 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
 
         h_str = str(h_expr)
         f_str = str(f_expr)
-        method = "symbolic (mpmath)"
+        method = "symbolic"
 
     except Exception as e_sym:
-        # === METODE NUMERIK ===
+        print(f"Symbolic failed: {e_sym}. Using numerical.")
         method = "numerical"
-        print(f"Symbolic failed: {e_sym}")
 
+        # Substitusi lambdas
         expr_num = expr.subs(lambdas)
-        R_func = sp.lambdify(t, expr_num, modules='mpmath')
+        R_func = sp.lambdify(t, expr_num, modules='numpy')
 
         for t_val in t_values:
-            t_mp = mpf(t_val)
             try:
-                R_t = R_func(t_mp)
-                R_t = safe_float(R_t)
+                R_t = float(R_func(t_val))
                 if R_t >= 1.0:
                     h_val = f_val = 0.0
                 elif R_t <= 0.0:
                     h_val = float('inf')
                     f_val = 0.0
                 else:
-                    delta = max(R_t * 1e-8, 1e-20)
+                    delta = max(t_val * 1e-8, 1e-12)
                     t_plus = t_val + delta
-                    t_minus = max(t_val - delta, 1e-20)
+                    t_minus = max(t_val - delta, 1e-12)
 
-                    R_plus = safe_float(R_func(mpf(t_plus)))
-                    R_minus = safe_float(R_func(mpf(t_minus)))
+                    R_plus = float(R_func(t_plus))
+                    R_minus = float(R_func(t_minus))
 
                     dR_dt = (R_plus - R_minus) / (2 * delta)
                     f_val = max(-dR_dt, 0)
                     h_val = f_val / R_t if R_t > 0 else 0.0
+
+                if abs(h_val) < 1e-40:
+                    h_val = 0.0
+                if abs(f_val) < 1e-40:
+                    f_val = 0.0
 
             except Exception as e_num:
                 print(f"Numerical error: {e_num}")
