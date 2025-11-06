@@ -20,7 +20,6 @@ def safe_R_eval(R_func, t_val):
 
 def calculate_reliability(fungsi_str, lambdas, t_values):
     t = sp.symbols('t')
-    
     lam_symbols = {name: sp.symbols(name) for name in lambdas.keys()}
     locals_dict = {**lam_symbols, 'exp': sp.exp}
     
@@ -34,38 +33,34 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
     method = "symbolic"
 
     try:
-        # BANTU SYMPY: simplify + expand
+        # BANTU SYMPY
         expr_simp = sp.simplify(expr)
         expr_exp = sp.expand(expr_simp)
-        
         h_expr = -sp.diff(expr_exp, t) / expr_exp
-        
-        # Coba lambdify
-        h_func = sp.lambdify(t, h_expr, modules=["numpy", {"exp": safe_exp}])
 
         rows = []
         for t_val in t_values:
             try:
-                h_val = float(h_func(t_val))
-                if np.isfinite(h_val) and h_val >= 0:
-                    rows.append({
-                        "t": f"{t_val:.6e}",
-                        "hazard_rate": f"{h_val:.6e}",
-                        **lambdas
-                    })
-                else:
+                # PAKAI evalf() → PASTI SIMBOLIK
+                h_val = float(h_expr.subs(t, t_val).evalf())
+                if not np.isfinite(h_val) or h_val < 0:
                     raise ValueError()
             except:
-                raise ValueError("lambdify failed")
+                h_val = 0.0
+
+            rows.append({
+                "t": f"{t_val:.6e}",
+                "hazard_rate": f"{h_val:.6e}",
+                **lambdas
+            })
 
         h_str = str(h_expr)
-        method = "symbolic (simplified)"
+        method = "symbolic (evalf)"
 
     except Exception as e_sym:
         method = "numerical"
-        print(f"Symbolic failed: {e_sym}. Using numerical diff.")
+        print(f"Symbolic evalf failed: {e_sym}. Using numerical diff.")
 
-        # Gunakan expr ASLI (tanpa simplify) untuk numerical
         expr_num = expr.subs(lambdas)
         R_func_raw = sp.lambdify(t, expr_num, modules=["numpy", {"exp": safe_exp}])
         def R_func(t_val):
