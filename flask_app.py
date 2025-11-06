@@ -10,103 +10,6 @@ def format_scientific(val):
     return f"{val:.6e}"
 
 
-# === LEVEL 1: SYMBOLIC (biasa) ===
-def try_symbolic(expr,lambdas,t_values,t,rows):
-    try:
-        # === METODE SIMBOLIK ===
-        expr_simp = sp.simplify(expr)
-        expr_exp = sp.expand(expr_simp)
-        f_expr = -sp.diff(expr_exp, t)
-        h_expr = f_expr / expr_exp
-        
-        h_expr = sp.simplify(h_expr)
-        f_expr = sp.simplify(f_expr)
-
-        # SUBSTITUSI LAMBDA DULU → baru lambdify
-        h_expr_num = h_expr.subs(lambdas)
-        f_expr_num = f_expr.subs(lambdas)
-
-        h_func = sp.lambdify(t, h_expr_num, modules='numpy')
-        f_func = sp.lambdify(t, f_expr_num, modules='numpy')
-
-        for t_val in t_values:
-            try:
-                h_val = float(h_func(t_val))
-                f_val = float(f_func(t_val))
-
-                if abs(h_val) < 1e-40:
-                    h_val = 0.0
-                if abs(f_val) < 1e-40:
-                    f_val = 0.0
-            except Exception as e:
-                print(f"Symbolic eval error at t={t_val}: {e}")
-                h_val = f_val = 0.0
-
-            rows.append({
-                "t": f"{t_val:.6e}",
-                "hazard_rate": format_scientific(h_val),
-                "failure_density": format_scientific(f_val),
-                **lambdas
-            })
-
-        h_str = str(h_expr)
-        f_str = str(f_expr)
-        method = "symbolic"
-    except Exception as e:
-        print(f"Symbolic (direct) failed: {e}")
-        return {
-            "method": "symbolic",
-            "h": f"error",
-            "f": f"error",
-            "data": []
-        }
-    
-# === LEVEL 2: SYMBOLIC via -d/dt log R(t) ===
-def try_symbolic_logR(expr, lambdas,t_values,t,rows):
-    try:
-        # Pastikan R(t) > 0 secara simbolik
-        logR = sp.log(expr)
-        h_expr = -sp.diff(logR, t)  # h(t) = -d(log R)/dt
-        f_expr = h_expr * expr         # f(t) = h(t) * R(t)
-
-        h_expr = sp.simplify(h_expr)
-        f_expr = sp.simplify(f_expr)
-
-        h_expr_num = h_expr.subs(lambdas)
-        f_expr_num = f_expr.subs(lambdas)
-
-        h_func = sp.lambdify(t, h_expr_num, 'numpy')
-        f_func = sp.lambdify(t, f_expr_num, 'numpy')
-
-        for t_val in t_values:
-            try:
-                h_val = float(h_func(t_val))
-                f_val = float(f_func(t_val))
-                if abs(h_val) < 1e-40: h_val = 0.0
-                if abs(f_val) < 1e-40: f_val = 0.0
-            except:
-                h_val = f_val = 0.0
-            rows.append({
-                "t": f"{t_val:.6e}",
-                "hazard_rate": format_scientific(h_val),
-                "failure_density": format_scientific(f_val),
-                **lambdas
-            })
-        return {
-            "method": "symbolic_logR",
-            "h": f"-d/dt log(R(t)) = {h_expr}",
-            "f": f"h(t) * R(t) = {f_expr}",
-            "data": rows
-        }
-    except Exception as e:
-        return {
-            "method": "symbolic_logR",
-            "h": f"error",
-            "f": f"error",
-            "data": []
-        }
-    
-
 def calculate_reliability(fungsi_str, lambdas, t_values):
     t = sp.symbols('t')
     lam_symbols = {name: sp.symbols(name) for name in lambdas.keys()}
@@ -125,9 +28,75 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
 
     try:
         try:
-            try_symbolic(expr,lambdas,t_values,t,rows)
+            # === METODE SIMBOLIK ===
+            expr_simp = sp.simplify(expr)
+            expr_exp = sp.expand(expr_simp)
+            f_expr = -sp.diff(expr_exp, t)
+            h_expr = f_expr / expr_exp
+            
+            h_expr = sp.simplify(h_expr)
+            f_expr = sp.simplify(f_expr)
+
+            # SUBSTITUSI LAMBDA DULU → baru lambdify
+            h_expr_num = h_expr.subs(lambdas)
+            f_expr_num = f_expr.subs(lambdas)
+
+            h_func = sp.lambdify(t, h_expr_num, modules='numpy')
+            f_func = sp.lambdify(t, f_expr_num, modules='numpy')
+
+            for t_val in t_values:
+                try:
+                    h_val = float(h_func(t_val))
+                    f_val = float(f_func(t_val))
+
+                    if abs(h_val) < 1e-40:
+                        h_val = 0.0
+                    if abs(f_val) < 1e-40:
+                        f_val = 0.0
+                except Exception as e:
+                    print(f"Symbolic eval error at t={t_val}: {e}")
+                    h_val = f_val = 0.0
+
+                rows.append({
+                    "t": f"{t_val:.6e}",
+                    "hazard_rate": format_scientific(h_val),
+                    "failure_density": format_scientific(f_val),
+                    **lambdas
+                })
+
+            h_str = str(h_expr)
+            f_str = str(f_expr)
+            method = "symbolic"
         except Exception as e_sym:
-            try_symbolic_logR(expr,lambdas,t_values,t,rows)
+            # Pastikan R(t) > 0 secara simbolik
+            logR = sp.log(expr)
+            h_expr = -sp.diff(logR, t)  # h(t) = -d(log R)/dt
+            f_expr = h_expr * expr         # f(t) = h(t) * R(t)
+
+            h_expr = sp.simplify(h_expr)
+            f_expr = sp.simplify(f_expr)
+
+            h_expr_num = h_expr.subs(lambdas)
+            f_expr_num = f_expr.subs(lambdas)
+
+            h_func = sp.lambdify(t, h_expr_num, 'numpy')
+            f_func = sp.lambdify(t, f_expr_num, 'numpy')
+
+            for t_val in t_values:
+                try:
+                    h_val = float(h_func(t_val))
+                    f_val = float(f_func(t_val))
+                    if abs(h_val) < 1e-40: h_val = 0.0
+                    if abs(f_val) < 1e-40: f_val = 0.0
+                except:
+                    h_val = f_val = 0.0
+                rows.append({
+                    "t": f"{t_val:.6e}",
+                    "hazard_rate": format_scientific(h_val),
+                    "failure_density": format_scientific(f_val),
+                    **lambdas
+                })
+        
     except Exception as e_sym:
         print(f"Symbolic failed: {e_sym}. Using numerical.")
         method = "numerical"
