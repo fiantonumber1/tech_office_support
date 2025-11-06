@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify
 import sympy as sp
 import numpy as np
 import pandas as pd
-
+import re
 app = Flask(__name__)
 
 # ------------------------------------------------------------------
