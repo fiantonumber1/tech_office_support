@@ -1,24 +1,24 @@
 from flask import Flask, request, jsonify
 import sympy as sp
 import pandas as pd
-from mpmath import mp, mpf, exp as mp_exp, nstr
+from mpmath import mp, mpf
 
 # Presisi cukup untuk 1e-8 * 1e5 = 1e-3
-mp.dps = 50
+mp.dps = 30
 
 app = Flask(__name__)
 
-def to_scientific_str(val, digits=10, default="0.000000e+00"):
-    """Konversi mpf ke string .6e dengan presisi tinggi"""
+def to_scientific_str(val, default="0.000000e+00"):
+    """Konversi mpf ke string .6e via float()"""
     if val == 0 or abs(val) < mpf('1e-40'):
         return default
-    s = nstr(val, digits)
-    # Pastikan format .6e
-    if 'e' in s:
-        coeff, exp = s.split('e')
-        coeff = coeff[:8]  # 1.xxxxxx
-        return f"{float(coeff):.6e}".replace('e', 'e')
-    return f"{float(s):.6e}"
+    try:
+        f = float(val)
+        if not (1e-40 <= abs(f) <= 1e10):  # batas aman float
+            return default
+        return f"{f:.6e}"
+    except:
+        return default
 
 def calculate_reliability(fungsi_str, lambdas, t_values):
     t = sp.symbols('t')
@@ -37,7 +37,7 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
     rows = []
 
     try:
-        # === METODE SIMBOLIK (mpmath) ===
+        # === METODE SIMBOLIK ===
         expr_simp = sp.simplify(expr)
         expr_exp = sp.expand(expr_simp)
         f_expr = -sp.diff(expr_exp, t)
@@ -55,11 +55,11 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
                 h_val = h_func(t_mp)
                 f_val = f_func(t_mp)
             except Exception as e:
-                print(f"Symbolic eval error at t={t_val}: {e}")
+                print(f"Symbolic error at t={t_val}: {e}")
                 h_val = f_val = mpf(0)
 
             rows.append({
-                "t": f"{float(t_val):.6e}",
+                "t": f"{t_val:.6e}",
                 "hazard_rate": to_scientific_str(h_val),
                 "failure_density": to_scientific_str(f_val),
                 **lambdas
@@ -70,9 +70,9 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
         method = "symbolic (mpmath)"
 
     except Exception as e_sym:
-        # === METODE NUMERIK (mpmath) ===
+        # === METODE NUMERIK ===
         method = "numerical"
-        print(f"Symbolic failed: {e_sym}. Using mpmath numerical diff.")
+        print(f"Symbolic failed: {e_sym}")
 
         expr_num = expr.subs(lambdas)
         R_func = sp.lambdify(t, expr_num, modules='mpmath')
@@ -87,9 +87,9 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
                     h_val = mpf('inf')
                     f_val = mpf(0)
                 else:
-                    delta = max(R_t * mpf('1e-10'), mpf('1e-50'))
+                    delta = max(R_t * mpf('1e-10'), mpf('1e-40'))
                     t_plus = t_mp + delta
-                    t_minus = t_mp - delta if t_mp > delta else mpf('1e-50')
+                    t_minus = max(t_mp - delta, mpf('1e-40'))
 
                     R_plus = R_func(t_plus)
                     R_minus = R_func(t_minus)
@@ -99,18 +99,18 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
                     h_val = f_val / R_t if R_t > 0 else mpf('inf')
 
             except Exception as e_num:
-                print(f"Numerical error at t={t_val}: {e_num}")
+                print(f"Numerical error: {e_num}")
                 h_val = f_val = mpf(0)
 
             rows.append({
-                "t": f"{float(t_val):.6e}",
+                "t": f"{t_val:.6e}",
                 "hazard_rate": to_scientific_str(h_val),
                 "failure_density": to_scientific_str(f_val),
                 **lambdas
             })
 
-        h_str = "numerical: h(t) ≈ -dR/dt / R(t) [mpmath]"
-        f_str = "numerical: f(t) ≈ -dR/dt [mpmath]"
+        h_str = "numerical (mpmath)"
+        f_str = "numerical (mpmath)"
 
     return {
         "R": R_str,
@@ -134,7 +134,7 @@ def calc():
     try:
         t_values = [float(t) for t in t_values]
         if any(t <= 0 for t in t_values):
-            return jsonify({"error": "All t_values must be > 0"}), 400
+            return jsonify({"error": "t > 0"}), 400
     except:
         return jsonify({"error": "Invalid t_values"}), 400
 
