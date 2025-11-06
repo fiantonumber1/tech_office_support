@@ -33,9 +33,8 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
         if sym:
             expr = expr.subs(sym, val)
 
+    # JANGAN POTONG! Biarkan full expression
     R_str = str(expr)
-    if len(R_str) > 200:
-        R_str = R_str[:200] + "..."
     h_str = "unknown"
     method = "symbolic"
 
@@ -59,10 +58,11 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
             except:
                 pass
             raise
-        h_str = str(h_expr)[:200] + "..." if len(str(h_expr)) > 200 else str(h_expr)
+
+        # FULL EXPRESSION, tanpa potong
+        h_str = str(h_expr)
 
     except Exception as e_sym:
-        # --- FALLBACK: Numerical derivative dari R_simp yang sudah disederhanakan ---
         method = "numerical (simplified symbolic + finite diff)"
         print(f"Symbolic hazard failed: {e_sym}. Using simplified R(t) + numerical diff.")
 
@@ -71,6 +71,7 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
             return safe_R_eval(R_func_raw, t_val)
 
         delta_ratio = 1e-6
+        rows = []
         for t_val in t_values:
             try:
                 R_t = R_func(t_val)
@@ -103,10 +104,13 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
                 **lambdas
             })
 
+        # h(t) tidak bisa diekspresikan simbolik → beri keterangan
+        h_str = "numerical: h(t) ≈ - (dR/dt) / R(t) using central difference"
+
     df = pd.DataFrame(rows)
     return {
-        "R": R_str,
-        "h": h_str,
+        "R": R_str,           # Full, tidak dipotong
+        "h": h_str,           # Full atau keterangan jelas
         "data": df.to_dict(orient="records"),
         "method": method
     }
@@ -124,31 +128,6 @@ def calc():
 
     try:
         result = calculate_reliability(fungsi, lambdas, t_values)
-
-        if data.get('include_plot', False):
-            try:
-                plt.figure(figsize=(10, 6))
-                df = pd.DataFrame(result['data'])
-                t_vals = df['t'].astype(float)
-                h_vals = df['hazard_rate'].astype(float)
-                mask = np.isfinite(h_vals) & (h_vals > 0)
-                if mask.any():
-                    plt.plot(t_vals[mask], h_vals[mask], 'o-', color='#e74c3c', linewidth=2, markersize=6)
-                    plt.yscale('log')
-                else:
-                    plt.text(0.5, 0.5, 'No valid data', transform=plt.gca().transAxes, ha='center', fontsize=12, color='gray')
-                plt.xlabel('Time (hours)')
-                plt.ylabel('Hazard Rate h(t)')
-                plt.title(f"{title}\n$R(t) = {result['R'][:100]}...$\n$h(t) = {result['h'][:100]}...$", fontsize=9)
-                plt.grid(True, which='both', ls=':', alpha=0.7)
-                buf = BytesIO()
-                plt.savefig(buf, format='png', dpi=150, bbox_inches='tight')
-                buf.seek(0)
-                result['plot_base64'] = base64.b64encode(buf.read()).decode('utf-8')
-                plt.close()
-            except Exception as e:
-                result['plot_base64'] = None
-
         return jsonify(result)
 
     except Exception as e:
