@@ -1,7 +1,8 @@
 from flask import Flask, request, jsonify
 import sympy as sp
 import pandas as pd
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+import warnings
+
 
 app = Flask(__name__)
 
@@ -9,6 +10,33 @@ def format_scientific(val):
     if val == 0 or abs(val) < 1e-40:
         return "0.000000e+00"
     return f"{val:.6e}"
+
+# === SAFE SIMPLIFY WITH TIMEOUT ===
+def safe_simplify(expr, timeout=20):
+    """
+    Simplify expression with SymPy timeout (in seconds).
+    Falls back to original expression if timeout or error.
+    """
+    try:
+        return sp.simplify(expr, timeout=timeout)
+    except TimeoutError:
+        print(f"Simplify timed out after {timeout}s. Using unsimplified expression.")
+        return expr
+    except Exception as e:
+        print(f"Simplify error: {e}. Using unsimplified.")
+        return expr
+
+# === SAFE EXPAND WITH TIMEOUT ===
+def safe_expand(expr, timeout=15):
+    try:
+        return sp.expand(expr, timeout=timeout)
+    except TimeoutError:
+        print(f"Expand timed out after {timeout}s. Using original.")
+        return expr
+    except Exception as e:
+        print(f"Expand error: {e}. Using original.")
+        return expr
+
 
 def calculate_reliability(fungsi_str, lambdas, t_values):
     t = sp.symbols('t')
@@ -26,100 +54,103 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
     method = "numerical"
     rows = []
 
-    # === FUNGSI BANTU: METODE SIMBOLIK LANGSUNG ===
+    # === METODE SIMBOLIK LANGSUNG ===
     def symbolic_direct():
-        expr_simp = sp.simplify(expr)
-        expr_exp = sp.expand(expr_simp)
-        f_expr = -sp.diff(expr_exp, t)
-        h_expr = f_expr / expr_exp
-        
-        h_expr = sp.simplify(h_expr)
-        f_expr = sp.simplify(f_expr)
+        try:
+            expr_simp = safe_simplify(expr, timeout=60)
+            expr_exp = safe_expand(expr_simp, timeout=60)
+            f_expr = -sp.diff(expr_exp, t)
+            h_expr = f_expr / expr_exp
 
-        h_expr_num = h_expr.subs(lambdas)
-        f_expr_num = f_expr.subs(lambdas)
+            h_expr = safe_simplify(h_expr, timeout=60)
+            f_expr = safe_simplify(f_expr, timeout=60)
 
-        h_func = sp.lambdify(t, h_expr_num, modules='numpy')
-        f_func = sp.lambdify(t, f_expr_num, modules='numpy')
+            h_expr_num = h_expr.subs(lambdas)
+            f_expr_num = f_expr.subs(lambdas)
 
-        local_rows = []
-        for t_val in t_values:
-            try:
-                h_val = float(h_func(t_val))
-                f_val = float(f_func(t_val))
-                if abs(h_val) < 1e-40: h_val = 0.0
-                if abs(f_val) < 1e-40: f_val = 0.0
-            except Exception as e:
-                print(f"Symbolic eval error at t={t_val}: {e}")
-                h_val = f_val = 0.0
-            local_rows.append({
-                "t": f"{t_val:.6e}",
-                "hazard_rate": format_scientific(h_val),
-                "failure_density": format_scientific(f_val),
-                **lambdas
-            })
-        return {
-            "h_str": str(h_expr),
-            "f_str": str(f_expr),
-            "rows": local_rows,
-            "method": "symbolic"
-        }
+            h_func = sp.lambdify(t, h_expr_num, modules='numpy')
+            f_func = sp.lambdify(t, f_expr_num, modules='numpy')
 
-    # === FUNGSI BANTU: METODE LOG ===
+            local_rows = []
+            for t_val in t_values:
+                try:
+                    h_val = float(h_func(t_val))
+                    f_val = float(f_func(t_val))
+                    if abs(h_val) < 1e-40: h_val = 0.0
+                    if abs(f_val) < 1e-40: f_val = 0.0
+                except Exception as e:
+                    print(f"Symbolic eval error at t={t_val}: {e}")
+                    h_val = f_val = 0.0
+                local_rows.append({
+                    "t": f"{t_val:.6e}",
+                    "hazard_rate": format_scientific(h_val),
+                    "failure_density": format_scientific(f_val),
+                    **lambdas
+                })
+            return {
+                "h_str": str(h_expr),
+                "f_str": str(f_expr),
+                "rows": local_rows,
+                "method": "symbolic"
+            }
+        except Exception as e:
+            raise RuntimeError(f"Symbolic direct failed: {e}")
+
+    # === METODE LOG (R(t) > 0) ===
     def symbolic_log():
-        logR = sp.log(expr)
-        h_expr = -sp.diff(logR, t)
-        f_expr = h_expr * expr
+        try:
+            logR = sp.log(expr)
+            h_expr = -sp.diff(logR, t)
+            f_expr = h_expr * expr
 
-        h_expr = sp.simplify(h_expr)
-        f_expr = sp.simplify(f_expr)
+            h_expr = safe_simplify(h_expr, timeout=60)
+            f_expr = safe_simplify(f_expr, timeout=60)
 
-        h_expr_num = h_expr.subs(lambdas)
-        f_expr_num = f_expr.subs(lambdas)
+            h_expr_num = h_expr.subs(lambdas)
+            f_expr_num = f_expr.subs(lambdas)
 
-        h_func = sp.lambdify(t, h_expr_num, 'numpy')
-        f_func = sp.lambdify(t, f_expr_num, 'numpy')
+            h_func = sp.lambdify(t, h_expr_num, 'numpy')
+            f_func = sp.lambdify(t, f_expr_num, 'numpy')
 
-        local_rows = []
-        for t_val in t_values:
-            try:
-                h_val = float(h_func(t_val))
-                f_val = float(f_func(t_val))
-                if abs(h_val) < 1e-40: h_val = 0.0
-                if abs(f_val) < 1e-40: f_val = 0.0
-            except:
-                h_val = f_val = 0.0
-            local_rows.append({
-                "t": f"{t_val:.6e}",
-                "hazard_rate": format_scientific(h_val),
-                "failure_density": format_scientific(f_val),
-                **lambdas
-            })
-        return {
-            "h_str": str(h_expr),
-            "f_str": str(f_expr),
-            "rows": local_rows,
-            "method": "symbolic_log"
-        }
+            local_rows = []
+            for t_val in t_values:
+                try:
+                    h_val = float(h_func(t_val))
+                    f_val = float(f_func(t_val))
+                    if abs(h_val) < 1e-40: h_val = 0.0
+                    if abs(f_val) < 1e-40: f_val = 0.0
+                except:
+                    h_val = f_val = 0.0
+                local_rows.append({
+                    "t": f"{t_val:.6e}",
+                    "hazard_rate": format_scientific(h_val),
+                    "failure_density": format_scientific(f_val),
+                    **lambdas
+                })
+            return {
+                "h_str": str(h_expr),
+                "f_str": str(f_expr),
+                "rows": local_rows,
+                "method": "symbolic_log"
+            }
+        except Exception as e:
+            raise RuntimeError(f"Log method failed: {e}")
 
-    # === COBA SIMBOLIK LANGSUNG DENGAN TIMEOUT 60 DETIK ===
+    # === COBA METODE SIMBOLIK LANGSUNG ===
     try:
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            print("Symbolic direct otw...")
-            future = executor.submit(symbolic_direct)
-            result = future.result(timeout=60)
-            h_str = result["h_str"]
-            f_str = result["f_str"]
-            rows = result["rows"]
-            method = result["method"]
-    except FutureTimeoutError:
-        print("Symbolic direct method timed out (>60s). Trying log method...")
+        print("Trying symbolic direct method...")
+        result = symbolic_direct()
+        h_str = result["h_str"]
+        f_str = result["f_str"]
+        rows = result["rows"]
+        method = result["method"]
     except Exception as e:
-        print(f"Symbolic direct method failed: {e}. Trying log method...")
+        print(f"Symbolic direct failed: {e}. Trying log method...")
 
-    # === JIKA SIMBOLIK GAGAL / TIMEOUT → COBA LOG ===
+    # === JIKA GAGAL → COBA LOG METHOD ===
     if method not in ("symbolic", "symbolic_log"):
         try:
+            print("Trying symbolic log method...")
             result = symbolic_log()
             h_str = result["h_str"]
             f_str = result["f_str"]
@@ -127,14 +158,11 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
             method = result["method"]
         except Exception as e_log:
             print(f"Log method failed: {e_log}. Falling back to numerical.")
-            # → Lanjut ke numerical
-        else:
-            # Jika log sukses, langsung return nanti
-            pass
 
     # === JIKA MASIH GAGAL → NUMERICAL ===
     if method not in ("symbolic", "symbolic_log"):
         method = "numerical"
+        print("Using numerical differentiation...")
         expr_num = expr.subs(lambdas)
         R_func = sp.lambdify(t, expr_num, modules='numpy')
 
@@ -162,7 +190,7 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
                 if abs(f_val) < 1e-40: f_val = 0.0
 
             except Exception as e_num:
-                print(f"Numerical error: {e_num}")
+                print(f"Numerical error at t={t_val}: {e_num}")
                 h_val = f_val = 0.0
 
             rows.append({
@@ -182,6 +210,7 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
         "data": pd.DataFrame(rows).to_dict(orient="records"),
         "method": method
     }
+
 
 @app.route('/calculate_hazard', methods=['POST'])
 def calc():
