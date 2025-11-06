@@ -105,6 +105,7 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
     # === COBA SIMBOLIK LANGSUNG DENGAN TIMEOUT 60 DETIK ===
     try:
         with ThreadPoolExecutor(max_workers=1) as executor:
+            print("Symbolic direct otw...")
             future = executor.submit(symbolic_direct)
             result = future.result(timeout=60)
             h_str = result["h_str"]
