@@ -2,6 +2,12 @@ from flask import Flask, request, jsonify
 import sympy as sp
 import numpy as np
 import pandas as pd
+from decimal import Decimal, getcontext
+from mpmath import mp
+
+# Set presisi global
+getcontext().prec = 80
+mp.dps = 80
 
 app = Flask(__name__)
 
@@ -17,6 +23,16 @@ def safe_R_eval(R_func, t_val):
         return max(min(result, 1.0), 0.0)
     except:
         return 1.0
+
+def to_scientific_str(val, default="0.000000e+00"):
+    """Konversi angka (mpf/Decimal/float) ke string .6e"""
+    if val == 0:
+        return default
+    try:
+        # Gunakan mpmath untuk format akurat
+        return f"{float(val):.6e}"
+    except:
+        return default
 
 def calculate_reliability(fungsi_str, lambdas, t_values):
     t = sp.symbols('t')
@@ -35,84 +51,74 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
     rows = []
 
     try:
-        # === METODE SIMBOLIK ===
+        # === METODE SIMBOLIK (presisi tinggi dengan mpmath) ===
         expr_simp = sp.simplify(expr)
         expr_exp = sp.expand(expr_simp)
-        f_expr = -sp.diff(expr_exp, t)        # f(t) = -dR/dt
-        h_expr = f_expr / expr_exp            # h(t) = f(t)/R(t)
+        f_expr = -sp.diff(expr_exp, t)
+        h_expr = f_expr / expr_exp
         
         h_expr = sp.simplify(h_expr)
         f_expr = sp.simplify(f_expr)
 
-        rows = []
         for t_val in t_values:
             try:
-                # Presisi tinggi: 70 digit → aman untuk 10^-60
-                h_val = float(h_expr.subs(t, t_val).evalf(dps=70, chop=True))
-                f_val = float(f_expr.subs(t, t_val).evalf(dps=70, chop=True))
+                # Gunakan mpmath untuk evaluasi presisi tinggi
+                t_mp = mp.mpf(t_val)
+                h_mp = sp.lambdify(t, h_expr, modules='mpmath')(t_mp)
+                f_mp = sp.lambdify(t, f_expr, modules='mpmath')(t_mp)
 
-                # Hanya nol jika benar-benar < 10^-60
-                if abs(h_val) < 1e-60:
-                    h_val = 0.0
-                if abs(f_val) < 1e-60:
-                    f_val = 0.0
-            except Exception as e:
-                print(f"High-precision eval error at t={t_val}: {e}")
+                h_val = float(h_mp) if abs(h_mp) >= 1e-60 else 0.0
+                f_val = float(f_mp) if abs(f_mp) >= 1e-60 else 0.0
+            except:
                 h_val = f_val = 0.0
 
             rows.append({
                 "t": f"{t_val:.6e}",
-                "hazard_rate": f"{h_val:.6e}" if h_val != 0 else "0.000000e+00",
-                "failure_density": f"{f_val:.6e}" if f_val != 0 else "0.000000e+00",
+                "hazard_rate": to_scientific_str(h_val),
+                "failure_density": to_scientific_str(f_val),
                 **lambdas
             })
 
         h_str = str(h_expr)
         f_str = str(f_expr)
-        method = "symbolic (evalf, dps=70)"
+        method = "symbolic (mpmath)"
 
     except Exception as e_sym:
-        # === METODE NUMERIK (tangani 10^-60) ===
+        # === METODE NUMERIK (presisi tinggi dengan mpmath) ===
         method = "numerical"
-        print(f"Symbolic evalf failed: {e_sym}. Using high-precision numerical diff.")
+        print(f"Symbolic failed: {e_sym}. Using mpmath numerical diff.")
 
         expr_num = expr.subs(lambdas)
-        R_func_raw = sp.lambdify(t, expr_num, modules=["numpy", {"exp": safe_exp}])
-        
-        def R_func(t_val):
-            return safe_R_eval(R_func_raw, t_val)
+        R_func_mp = sp.lambdify(t, expr_num, modules='mpmath')
 
         rows = []
-
         for t_val in t_values:
             try:
-                R_t = R_func(t_val)
-
+                t_mp = mp.mpf(t_val)
+                R_t = float(R_func_mp(t_mp))
                 if R_t >= 1.0:
                     h_val = f_val = 0.0
                 elif R_t <= 0.0:
-                    h_val = np.inf
+                    h_val = float('inf')
                     f_val = 0.0
                 else:
-                    # Delta adaptif: skala perubahan R(t), bukan t
-                    eps = 1e-12
-                    delta = max(R_t * eps, 1e-70)  # aman sampai 10^-60
-                    t_plus  = t_val + delta
-                    t_minus = max(t_val - delta, 1e-70)
+                    # Delta adaptif dengan mpmath
+                    eps = mp.mpf('1e-12')
+                    delta = max(mp.mpf(R_t) * eps, mp.mpf('1e-70'))
+                    t_plus = t_mp + delta
+                    t_minus = mp.max(t_mp - delta, mp.mpf('1e-70'))
 
-                    R_plus  = R_func(t_plus)
-                    R_minus = R_func(t_minus)
+                    R_plus = R_func_mp(t_plus)
+                    R_minus = R_func_mp(t_minus)
 
-                    # Clip ultra-ketat
-                    R_plus  = np.clip(R_plus,  1e-80, 1.0 - 1e-80)
-                    R_minus = np.clip(R_minus, 1e-80, 1.0 - 1e-80)
-                    R_t_clipped = np.clip(R_t, 1e-80, 1.0 - 1e-80)
+                    R_plus = mp.nstr(mp.mpf(R_plus), 15)
+                    R_minus = mp.nstr(mp.mpf(R_minus), 15)
+                    R_t_clipped = mp.mpf(max(R_t, 1e-80))
 
-                    dR_dt = (R_plus - R_minus) / (2 * delta)
-                    f_val = max(-dR_dt, 0)
-                    h_val = max(-dR_dt / R_t_clipped, 0)
+                    dR_dt = (mp.mpf(R_plus) - mp.mpf(R_minus)) / (2 * delta)
+                    f_val = float(-dR_dt) if -dR_dt > 0 else 0.0
+                    h_val = float(-dR_dt / R_t_clipped) if R_t_clipped > 0 else 0.0
 
-                # Hanya anggap nol jika < 10^-60
                 h_val = 0.0 if abs(h_val) < 1e-60 else h_val
                 f_val = 0.0 if abs(f_val) < 1e-60 else f_val
 
@@ -122,13 +128,14 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
 
             rows.append({
                 "t": f"{t_val:.6e}",
-                "hazard_rate": f"{h_val:.6e}" if h_val != 0 else "0.000000e+00",
-                "failure_density": f"{f_val:.6e}" if f_val != 0 else "0.000000e+00",
+                "hazard_rate": to_scientific_str(h_val),
+                "failure_density": to_scientific_str(f_val),
                 **lambdas
             })
 
-        h_str = "numerical: h(t) ≈ -dR/dt / R(t)"
-        f_str = "numerical: f(t) ≈ -dR/dt"
+        h_str = "numerical: h(t) ≈ -dR/dt / R(t) [mpmath]"
+        f_str = "numerical: f(t) ≈ -dR/dt [mpmath]"
+
     return {
         "R": R_str,
         "h": h_str,
