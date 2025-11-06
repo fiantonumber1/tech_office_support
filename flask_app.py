@@ -36,8 +36,11 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
         # BANTU SYMPY
         expr_simp = sp.simplify(expr)
         expr_exp = sp.expand(expr_simp)
-        h_expr = -sp.diff(expr_exp, t) / expr_exp
+        f_expr = -sp.diff(expr_exp, t)
+        h_expr = f_expr / expr_exp
+        
         h_expr = sp.simplify(h_expr)
+        
 
         rows = []
         for t_val in t_values:
@@ -56,9 +59,11 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
             })
 
         h_str = str(h_expr)
+        f_str = str(f_expr)
         method = "symbolic (evalf)"
 
     except Exception as e_sym:
+        f_str=""
         method = "numerical"
         print(f"Symbolic evalf failed: {e_sym}. Using numerical diff.")
 
@@ -104,6 +109,7 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
     return {
         "R": R_str,
         "h": h_str,
+        "f": f_str,
         "data": pd.DataFrame(rows).to_dict(orient="records"),
         "method": method
     }
