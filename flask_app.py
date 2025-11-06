@@ -9,22 +9,9 @@ def format_scientific(val):
         return "0.000000e+00"
     return f"{val:.6e}"
 
-def calculate_reliability(fungsi_str, lambdas, t_values):
-    t = sp.symbols('t')
-    lam_symbols = {name: sp.symbols(name) for name in lambdas.keys()}
-    locals_dict = {**lam_symbols, 'exp': sp.exp}
-    
-    try:
-        expr = sp.sympify(fungsi_str, locals=locals_dict)
-    except Exception as e:
-        raise ValueError(f"Parse error: {e}")
 
-    R_str = fungsi_str
-    h_str = "unknown"
-    f_str = "unknown"
-    method = "symbolic"
-    rows = []
-
+# === LEVEL 1: SYMBOLIC (biasa) ===
+def try_symbolic(expr,lambdas,t_values,t,rows):
     try:
         # === METODE SIMBOLIK ===
         expr_simp = sp.simplify(expr)
@@ -65,7 +52,82 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
         h_str = str(h_expr)
         f_str = str(f_expr)
         method = "symbolic"
+    except Exception as e:
+        print(f"Symbolic (direct) failed: {e}")
+        return {
+            "method": "symbolic",
+            "h": f"error",
+            "f": f"error",
+            "data": []
+        }
+    
+# === LEVEL 2: SYMBOLIC via -d/dt log R(t) ===
+def try_symbolic_logR(expr, lambdas,t_values,t,rows):
+    try:
+        # Pastikan R(t) > 0 secara simbolik
+        logR = sp.log(expr)
+        h_expr = -sp.diff(logR, t)  # h(t) = -d(log R)/dt
+        f_expr = h_expr * expr         # f(t) = h(t) * R(t)
 
+        h_expr = sp.simplify(h_expr)
+        f_expr = sp.simplify(f_expr)
+
+        h_expr_num = h_expr.subs(lambdas)
+        f_expr_num = f_expr.subs(lambdas)
+
+        h_func = sp.lambdify(t, h_expr_num, 'numpy')
+        f_func = sp.lambdify(t, f_expr_num, 'numpy')
+
+        for t_val in t_values:
+            try:
+                h_val = float(h_func(t_val))
+                f_val = float(f_func(t_val))
+                if abs(h_val) < 1e-40: h_val = 0.0
+                if abs(f_val) < 1e-40: f_val = 0.0
+            except:
+                h_val = f_val = 0.0
+            rows.append({
+                "t": f"{t_val:.6e}",
+                "hazard_rate": format_scientific(h_val),
+                "failure_density": format_scientific(f_val),
+                **lambdas
+            })
+        return {
+            "method": "symbolic_logR",
+            "h": f"-d/dt log(R(t)) = {h_expr}",
+            "f": f"h(t) * R(t) = {f_expr}",
+            "data": rows
+        }
+    except Exception as e:
+        return {
+            "method": "symbolic_logR",
+            "h": f"error",
+            "f": f"error",
+            "data": []
+        }
+    
+
+def calculate_reliability(fungsi_str, lambdas, t_values):
+    t = sp.symbols('t')
+    lam_symbols = {name: sp.symbols(name) for name in lambdas.keys()}
+    locals_dict = {**lam_symbols, 'exp': sp.exp}
+    
+    try:
+        expr = sp.sympify(fungsi_str, locals=locals_dict)
+    except Exception as e:
+        raise ValueError(f"Parse error: {e}")
+
+    R_str = fungsi_str
+    h_str = "unknown"
+    f_str = "unknown"
+    method = "symbolic"
+    rows = []
+
+    try:
+        try:
+            try_symbolic(expr,lambdas,t_values,t,rows)
+        except Exception as e_sym:
+            try_symbolic_logR(expr,lambdas,t_values,t,rows)
     except Exception as e_sym:
         print(f"Symbolic failed: {e_sym}. Using numerical.")
         method = "numerical"
