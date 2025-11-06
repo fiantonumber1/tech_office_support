@@ -21,15 +21,11 @@ def safe_R_eval(R_func, t_val):
 def calculate_reliability(fungsi_str, lambdas, t_values):
     t = sp.symbols('t')
     
-    # Simbol lambda dinamis
     lam_symbols = {name: sp.symbols(name) for name in lambdas.keys()}
-    
-    # TAMBAHKAN exp: sp.exp
     locals_dict = {**lam_symbols, 'exp': sp.exp}
     
     try:
         expr = sp.sympify(fungsi_str, locals=locals_dict)
-        expr_num = expr.subs(lambdas)  # untuk numerical
     except Exception as e:
         raise ValueError(f"Parse error: {e}")
 
@@ -38,28 +34,39 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
     method = "symbolic"
 
     try:
-        h_expr = -sp.diff(expr, t) / expr
+        # BANTU SYMPY: simplify + expand
+        expr_simp = sp.simplify(expr)
+        expr_exp = sp.expand(expr_simp)
+        
+        h_expr = -sp.diff(expr_exp, t) / expr_exp
+        
+        # Coba lambdify
         h_func = sp.lambdify(t, h_expr, modules=["numpy", {"exp": safe_exp}])
 
         rows = []
         for t_val in t_values:
-            h_val = float(h_func(t_val))
-            if np.isfinite(h_val) and h_val >= 0:
-                rows.append({
-                    "t": f"{t_val:.6e}",
-                    "hazard_rate": f"{h_val:.6e}",
-                    **lambdas
-                })
-            else:
-                raise ValueError()
+            try:
+                h_val = float(h_func(t_val))
+                if np.isfinite(h_val) and h_val >= 0:
+                    rows.append({
+                        "t": f"{t_val:.6e}",
+                        "hazard_rate": f"{h_val:.6e}",
+                        **lambdas
+                    })
+                else:
+                    raise ValueError()
+            except:
+                raise ValueError("lambdify failed")
 
         h_str = str(h_expr)
-        method = "symbolic"
+        method = "symbolic (simplified)"
 
     except Exception as e_sym:
         method = "numerical"
         print(f"Symbolic failed: {e_sym}. Using numerical diff.")
 
+        # Gunakan expr ASLI (tanpa simplify) untuk numerical
+        expr_num = expr.subs(lambdas)
         R_func_raw = sp.lambdify(t, expr_num, modules=["numpy", {"exp": safe_exp}])
         def R_func(t_val):
             return safe_R_eval(R_func_raw, t_val)
