@@ -44,34 +44,37 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
         h_expr = sp.simplify(h_expr)
         f_expr = sp.simplify(f_expr)
 
+        rows = []
         for t_val in t_values:
             try:
-                h_val = float(h_expr.subs(t, t_val).evalf())
-                f_val = float(f_expr.subs(t, t_val).evalf())
+                # Presisi tinggi: 70 digit → aman untuk 10^-60
+                h_val = float(h_expr.subs(t, t_val).evalf(dps=70, chop=True))
+                f_val = float(f_expr.subs(t, t_val).evalf(dps=70, chop=True))
 
-                if not np.isfinite(h_val) or h_val < 0:
+                # Hanya nol jika benar-benar < 10^-60
+                if abs(h_val) < 1e-60:
                     h_val = 0.0
-                if not np.isfinite(f_val) or f_val < 0:
+                if abs(f_val) < 1e-60:
                     f_val = 0.0
-            except:
-                h_val = 0.0
-                f_val = 0.0
+            except Exception as e:
+                print(f"High-precision eval error at t={t_val}: {e}")
+                h_val = f_val = 0.0
 
             rows.append({
                 "t": f"{t_val:.6e}",
-                "hazard_rate": f"{h_val:.6e}",
-                "failure_density": f"{f_val:.6e}",
+                "hazard_rate": f"{h_val:.6e}" if h_val != 0 else "0.000000e+00",
+                "failure_density": f"{f_val:.6e}" if f_val != 0 else "0.000000e+00",
                 **lambdas
             })
 
         h_str = str(h_expr)
         f_str = str(f_expr)
-        method = "symbolic (evalf)"
+        method = "symbolic (evalf, dps=70)"
 
     except Exception as e_sym:
-        # === METODE NUMERIK (jika simbolik gagal) ===
+        # === METODE NUMERIK (tangani 10^-60) ===
         method = "numerical"
-        print(f"Symbolic evalf failed: {e_sym}. Using numerical diff.")
+        print(f"Symbolic evalf failed: {e_sym}. Using high-precision numerical diff.")
 
         expr_num = expr.subs(lambdas)
         R_func_raw = sp.lambdify(t, expr_num, modules=["numpy", {"exp": safe_exp}])
@@ -79,7 +82,6 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
         def R_func(t_val):
             return safe_R_eval(R_func_raw, t_val)
 
-        delta_ratio = 1e-6
         rows = []
 
         for t_val in t_values:
@@ -87,45 +89,46 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
                 R_t = R_func(t_val)
 
                 if R_t >= 1.0:
-                    h_val = 0.0
-                    f_val = 0.0
+                    h_val = f_val = 0.0
                 elif R_t <= 0.0:
                     h_val = np.inf
                     f_val = 0.0
                 else:
-                    delta = max(t_val * delta_ratio, 1e-8)
-                    t_plus = t_val + delta
-                    t_minus = max(t_val - delta, 1e-8)
-                    R_plus = R_func(t_plus)
+                    # Delta adaptif: skala perubahan R(t), bukan t
+                    eps = 1e-12
+                    delta = max(R_t * eps, 1e-70)  # aman sampai 10^-60
+                    t_plus  = t_val + delta
+                    t_minus = max(t_val - delta, 1e-70)
+
+                    R_plus  = R_func(t_plus)
                     R_minus = R_func(t_minus)
 
-                    # Clip untuk stabilitas
-                    R_plus = np.clip(R_plus, 1e-12, 0.999999999999)
-                    R_minus = np.clip(R_minus, 1e-12, 0.999999999999)
-                    R_t_clipped = np.clip(R_t, 1e-12, 0.999999999999)
+                    # Clip ultra-ketat
+                    R_plus  = np.clip(R_plus,  1e-80, 1.0 - 1e-80)
+                    R_minus = np.clip(R_minus, 1e-80, 1.0 - 1e-80)
+                    R_t_clipped = np.clip(R_t, 1e-80, 1.0 - 1e-80)
 
                     dR_dt = (R_plus - R_minus) / (2 * delta)
-                    f_val = max(-dR_dt, 0)                     # f(t) = -dR/dt
-                    h_val = max(-dR_dt / R_t_clipped, 0)       # h(t) = -dR/dt / R(t)
+                    f_val = max(-dR_dt, 0)
+                    h_val = max(-dR_dt / R_t_clipped, 0)
 
-                h_val = 0.0 if not np.isfinite(h_val) else h_val
-                f_val = 0.0 if not np.isfinite(f_val) else f_val
+                # Hanya anggap nol jika < 10^-60
+                h_val = 0.0 if abs(h_val) < 1e-60 else h_val
+                f_val = 0.0 if abs(f_val) < 1e-60 else f_val
 
             except Exception as e_num:
                 print(f"Numerical error at t={t_val}: {e_num}")
-                h_val = 0.0
-                f_val = 0.0
+                h_val = f_val = 0.0
 
             rows.append({
                 "t": f"{t_val:.6e}",
-                "hazard_rate": f"{h_val:.6e}" if np.isfinite(h_val) else "0.000000e+00",
-                "failure_density": f"{f_val:.6e}" if np.isfinite(f_val) else "0.000000e+00",
+                "hazard_rate": f"{h_val:.6e}" if h_val != 0 else "0.000000e+00",
+                "failure_density": f"{f_val:.6e}" if f_val != 0 else "0.000000e+00",
                 **lambdas
             })
 
         h_str = "numerical: h(t) ≈ -dR/dt / R(t)"
         f_str = "numerical: f(t) ≈ -dR/dt"
-
     return {
         "R": R_str,
         "h": h_str,
