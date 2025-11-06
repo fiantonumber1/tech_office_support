@@ -3,22 +3,28 @@ import sympy as sp
 import pandas as pd
 from mpmath import mp, mpf
 
-# Presisi cukup untuk 1e-8 * 1e5 = 1e-3
-mp.dps = 30
+# Presisi cukup untuk 0.0000395 * 31200 = 1.23
+mp.dps = 20
 
 app = Flask(__name__)
 
-def to_scientific_str(val, default="0.000000e+00"):
-    """Konversi mpf ke string .6e via float()"""
-    if val == 0 or abs(val) < mpf('1e-40'):
-        return default
+def safe_float(val, threshold=1e-40):
+    """Konversi mpf ke float, tapi jangan jadi 0 karena underflow"""
+    if val == 0 or abs(val) < mpf(threshold):
+        return 0.0
     try:
         f = float(val)
-        if not (1e-40 <= abs(f) <= 1e10):  # batas aman float
-            return default
-        return f"{f:.6e}"
+        if abs(f) < 1e-40:
+            return 0.0
+        return f
     except:
-        return default
+        return 0.0
+
+def format_scientific(val):
+    """Format float ke .6e"""
+    if val == 0:
+        return "0.000000e+00"
+    return f"{val:.6e}"
 
 def calculate_reliability(fungsi_str, lambdas, t_values):
     t = sp.symbols('t')
@@ -52,16 +58,16 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
         for t_val in t_values:
             t_mp = mpf(t_val)
             try:
-                h_val = h_func(t_mp)
-                f_val = f_func(t_mp)
+                h_val = safe_float(h_func(t_mp))
+                f_val = safe_float(f_func(t_mp))
             except Exception as e:
-                print(f"Symbolic error at t={t_val}: {e}")
-                h_val = f_val = mpf(0)
+                print(f"Error: {e}")
+                h_val = f_val = 0.0
 
             rows.append({
                 "t": f"{t_val:.6e}",
-                "hazard_rate": to_scientific_str(h_val),
-                "failure_density": to_scientific_str(f_val),
+                "hazard_rate": format_scientific(h_val),
+                "failure_density": format_scientific(f_val),
                 **lambdas
             })
 
@@ -81,36 +87,37 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
             t_mp = mpf(t_val)
             try:
                 R_t = R_func(t_mp)
-                if R_t >= 1:
-                    h_val = f_val = mpf(0)
-                elif R_t <= 0:
-                    h_val = mpf('inf')
-                    f_val = mpf(0)
+                R_t = safe_float(R_t)
+                if R_t >= 1.0:
+                    h_val = f_val = 0.0
+                elif R_t <= 0.0:
+                    h_val = float('inf')
+                    f_val = 0.0
                 else:
-                    delta = max(R_t * mpf('1e-10'), mpf('1e-40'))
-                    t_plus = t_mp + delta
-                    t_minus = max(t_mp - delta, mpf('1e-40'))
+                    delta = max(R_t * 1e-8, 1e-20)
+                    t_plus = t_val + delta
+                    t_minus = max(t_val - delta, 1e-20)
 
-                    R_plus = R_func(t_plus)
-                    R_minus = R_func(t_minus)
+                    R_plus = safe_float(R_func(mpf(t_plus)))
+                    R_minus = safe_float(R_func(mpf(t_minus)))
 
                     dR_dt = (R_plus - R_minus) / (2 * delta)
-                    f_val = -dR_dt if dR_dt < 0 else mpf(0)
-                    h_val = f_val / R_t if R_t > 0 else mpf('inf')
+                    f_val = max(-dR_dt, 0)
+                    h_val = f_val / R_t if R_t > 0 else 0.0
 
             except Exception as e_num:
                 print(f"Numerical error: {e_num}")
-                h_val = f_val = mpf(0)
+                h_val = f_val = 0.0
 
             rows.append({
                 "t": f"{t_val:.6e}",
-                "hazard_rate": to_scientific_str(h_val),
-                "failure_density": to_scientific_str(f_val),
+                "hazard_rate": format_scientific(h_val),
+                "failure_density": format_scientific(f_val),
                 **lambdas
             })
 
-        h_str = "numerical (mpmath)"
-        f_str = "numerical (mpmath)"
+        h_str = "numerical"
+        f_str = "numerical"
 
     return {
         "R": R_str,
