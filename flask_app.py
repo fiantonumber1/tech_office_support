@@ -382,11 +382,8 @@ def calc():
             subs_dict["R"] = r_target_to_find_t
             try:
                 inv = invert_by_low_order_taylor(fungsi, order=2, do_subs=subs_dict)
-                result['t_for_R'] = {
-                    'R_target': r_target_to_find_t,
-                    't_symbolic': str(inv['t_chosen']) if inv['t_chosen'] else None,
-                    't_numeric': float(inv['t_chosen_subs']) if inv['t_chosen_subs'] else None
-                }
+                result['t_expression'] = str(inv['t_chosen'])
+                result['t_value'] = float(inv['t_chosen_subs'])
             except Exception as e_inv:
                 result['t_for_R'] = {
                     'R_target': r_target_to_find_t,
