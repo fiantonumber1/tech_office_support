@@ -375,7 +375,30 @@ def calc():
 
     try:
         result = calculate_reliability(fungsi, lambdas, t_values)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
+@app.route('/calculate_t_r', methods=['POST'])
+def calc_t_r():
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No JSON"}), 400
+
+    fungsi = data.get('fungsi', '1')
+    lambdas = data.get('lambdas', {})
+    t_values = data.get('t_values', [1000])
+    r_target_to_find_t = data.get('r_target', 0.9)  # Default 0.9
+
+    try:
+        t_values = [float(t) for t in t_values]
+        if any(t <= 0 for t in t_values):
+            return jsonify({"error": "t > 0"}), 400
+    except:
+        return jsonify({"error": "Invalid t_values"}), 400
+
+    try:
+        result = {}
         # --- INVERSE CALCULATION: Find t such that R(t) = r_target ---
         if 0 < r_target_to_find_t < 1:
             subs_dict = lambdas.copy()
