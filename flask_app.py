@@ -364,7 +364,7 @@ def calc():
     fungsi = data.get('fungsi', '1')
     lambdas = data.get('lambdas', {})
     t_values = data.get('t_values', [1000])
-    r_target_to_find_t=data.get('r_target', 0.9)
+    r_target_to_find_t = data.get('r_target', 0.9)  # Default 0.9
 
     try:
         t_values = [float(t) for t in t_values]
@@ -374,12 +374,27 @@ def calc():
         return jsonify({"error": "Invalid t_values"}), 400
 
     try:
-        
         result = calculate_reliability(fungsi, lambdas, t_values)
-        lambdas["R"]=0.9
-        # res = invert_by_low_order_taylor(fungsi, order=2, do_subs=lambdas)
-        # result['t_chosen'] = res['t_chosen']
-        # result['t_chosen_subs'] = res['t_chosen_subs']
+
+        # --- INVERSE CALCULATION: Find t such that R(t) = r_target ---
+        if 0 < r_target_to_find_t < 1:
+            subs_dict = lambdas.copy()
+            subs_dict["R"] = r_target_to_find_t
+            try:
+                inv = invert_by_low_order_taylor(fungsi, order=2, do_subs=subs_dict)
+                result['t_for_R'] = {
+                    'R_target': r_target_to_find_t,
+                    't_symbolic': str(inv['t_chosen']) if inv['t_chosen'] else None,
+                    't_numeric': float(inv['t_chosen_subs']) if inv['t_chosen_subs'] else None
+                }
+            except Exception as e_inv:
+                result['t_for_R'] = {
+                    'R_target': r_target_to_find_t,
+                    'error': f"Inversion failed: {str(e_inv)}"
+                }
+        else:
+            result['t_for_R'] = {"error": "r_target must be between 0 and 1"}
+
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
