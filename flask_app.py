@@ -377,9 +377,9 @@ def calc():
         
         result = calculate_reliability(fungsi, lambdas, t_values)
         lambdas["R"]=0.9
-        res = invert_by_low_order_taylor(fungsi, order=2, do_subs=lambdas)
-        result['t_chosen'] = res['t_chosen']
-        result['t_chosen_subs'] = res['t_chosen_subs']
+        # res = invert_by_low_order_taylor(fungsi, order=2, do_subs=lambdas)
+        # result['t_chosen'] = res['t_chosen']
+        # result['t_chosen_subs'] = res['t_chosen_subs']
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
