@@ -388,6 +388,7 @@ def calc_t_r():
     fungsi = data.get('fungsi', '1')
     lambdas = data.get('lambdas', {})
     t_values = data.get('t_values', [1000])
+    ordo = data.get('ordo', 2)
     r_target_to_find_t = data.get('r_target', 0.9)  # Default 0.9
 
     try:
@@ -404,7 +405,7 @@ def calc_t_r():
             subs_dict = lambdas.copy()
             subs_dict["R"] = r_target_to_find_t
             try:
-                inv = invert_by_low_order_taylor(fungsi, order=2, do_subs=subs_dict)
+                inv = invert_by_low_order_taylor(fungsi, order=ordo, do_subs=subs_dict)
                 result['t_expression'] = str(inv['t_chosen'])
                 result['t_value'] = float(inv['t_chosen_subs'])
             except Exception as e_inv:
