@@ -1,8 +1,7 @@
 from flask import Flask, request, jsonify
 import sympy as sp
 import pandas as pd
-import warnings
-
+import re
 
 app = Flask(__name__)
 
@@ -212,6 +211,79 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
     }
 
 
+def invert_by_low_order_taylor(r_target,R_t_str, order=2, do_subs=None):
+    """
+    Membalik R(t) menjadi t(R) dengan pendekatan deret Taylor orde rendah.
+
+    Parameters
+    ----------
+    R_t_str : str
+        Fungsi reliabilitas, mis. "exp(-lam*t)" atau fungsi kompleks.
+    order : int
+        Orde deret Taylor (1 = linear, 2 = kuadrat, dst.)
+    do_subs : dict (optional)
+        Substitusi nilai numerik, mis. {'lam': 3e-5}.
+
+    Returns
+    -------
+    dict dengan:
+        - 't_chosen' : solusi simbolik utama (yang realistis)
+        - 't_chosen_subs' : solusi numerik (jika do_subs diberikan)
+        - 'R_series' : ekspansi Taylor R(t)
+        - 'R_expr' : ekspresi asli R(t)
+    """
+    t, R = sp.symbols('t R')
+
+    # Deteksi simbol lambda dan variabel lain
+    local_names = {'t': t, 'R': R, 'exp': sp.exp}
+    found = set(re.findall(r'lam[A-Za-z0-9_]*', R_t_str))
+    if 'lam' in R_t_str and 'lam' not in found:
+        found.add('lam')
+    found.update(set(re.findall(r'[A-Z]', R_t_str)))
+    for name in found:
+        local_names[name] = sp.symbols(name)
+
+    # Parse ekspresi
+    expr_str = R_t_str.replace('^', '**').replace('\n', '').strip()
+    R_expr = sp.sympify(expr_str, locals=local_names)
+
+    # Deret Taylor sekitar t=0
+    R_series = sp.series(R_expr, t, 0, order + 1).removeO().expand()
+
+    # Pecahkan R_series == R untuk t
+    sols = sp.solve(sp.Eq(R_series, R), t)
+
+    # Pilih solusi yang paling "masuk akal": real, positif, kecil untuk R≈1
+    best_sol = None
+    min_abs_val = float('inf')
+    test_R = 0.99
+    for s in sols:
+        try:
+            s_val = s.subs({R: test_R})
+            if s_val.is_real and s_val > 0:
+                abs_val = abs(s_val)
+                if abs_val < min_abs_val:
+                    min_abs_val = abs_val
+                    best_sol = s
+        except Exception:
+            pass
+    if best_sol is None and sols:
+        best_sol = sols[0]
+
+    # Substitusi numerik jika diminta
+    t_chosen_subs = None
+    if do_subs and best_sol is not None:
+        try:
+            t_chosen_subs = sp.simplify(best_sol.subs(do_subs))
+        except Exception:
+            t_chosen_subs = None
+
+    return {
+        't_chosen': best_sol,
+        't_chosen_subs': t_chosen_subs
+    }
+
+
 @app.route('/calculate_hazard', methods=['POST'])
 def calc():
     data = request.get_json()
@@ -221,6 +293,7 @@ def calc():
     fungsi = data.get('fungsi', '1')
     lambdas = data.get('lambdas', {})
     t_values = data.get('t_values', [1000])
+    r_target_to_find_t=data.get('r_target', 0.9)
 
     try:
         t_values = [float(t) for t in t_values]
@@ -230,7 +303,11 @@ def calc():
         return jsonify({"error": "Invalid t_values"}), 400
 
     try:
+        
         result = calculate_reliability(fungsi, lambdas, t_values)
+        res = invert_by_low_order_taylor(r_target_to_find_t,fungsi, order=2, do_subs=lambdas)
+        result['t_chosen'] = res['t_chosen']
+        result['t_chosen_subs'] = res['t_chosen_subs']
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
