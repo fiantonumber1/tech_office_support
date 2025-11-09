@@ -227,8 +227,8 @@ def invert_by_low_order_taylor(R_t_str, order=2, do_subs=None):
     Returns
     -------
     dict dengan:
-        - 't_chosen' : solusi simbolik utama (yang realistis)
-        - 't_chosen_subs' : solusi numerik (jika do_subs diberikan)
+        - 't_expression' : solusi simbolik utama (yang realistis)
+        - 't_value_R' : solusi numerik (jika do_subs diberikan)
         - 'R_series' : ekspansi Taylor R(t)
         - 'R_expr' : ekspresi asli R(t)
     """
@@ -279,8 +279,8 @@ def invert_by_low_order_taylor(R_t_str, order=2, do_subs=None):
             t_chosen_subs = None
 
     return {
-        't_chosen': best_sol,
-        't_chosen_subs': t_chosen_subs
+        't_expression': best_sol,
+        't_value_R': t_chosen_subs
     }
 
 
@@ -307,8 +307,8 @@ def calc():
         result = calculate_reliability(fungsi, lambdas, t_values)
         lambdas["R"]=r_target_to_find_t
         res = invert_by_low_order_taylor(fungsi, order=2, do_subs=lambdas)
-        result['t_chosen'] = res['t_chosen']
-        result['t_chosen_subs'] = res['t_chosen_subs']
+        result['t_expression'] = res['t_expression']
+        result['t_value_R'] = res['t_value_R']
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
