@@ -211,7 +211,7 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
     }
 
 
-def invert_by_low_order_taylor(r_target,R_t_str, order=2, do_subs=None):
+def invert_by_low_order_taylor(R_t_str, order=2, do_subs=None):
     """
     Membalik R(t) menjadi t(R) dengan pendekatan deret Taylor orde rendah.
 
@@ -305,7 +305,8 @@ def calc():
     try:
         
         result = calculate_reliability(fungsi, lambdas, t_values)
-        res = invert_by_low_order_taylor(r_target_to_find_t,fungsi, order=2, do_subs=lambdas)
+        lambdas["R"]=r_target_to_find_t
+        res = invert_by_low_order_taylor(fungsi, order=2, do_subs=lambdas)
         result['t_chosen'] = res['t_chosen']
         result['t_chosen_subs'] = res['t_chosen_subs']
         return jsonify(result)
