@@ -209,78 +209,77 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
         "method": method
     }
 
-def invert_by_low_order_taylor(r_target,R_t_str, order=2, do_subs=None):
-    """
-    Membalik R(t) menjadi t(R) dengan pendekatan deret Taylor orde rendah.
+def invert_by_low_order_taylor(r_target, R_t_str, order=2, do_subs=None):
+    t, R = sp.symbols('t R', positive=True)  # t dan R positif
 
-    Parameters
-    ----------
-    R_t_str : str
-        Fungsi reliabilitas, mis. "exp(-lam*t)" atau fungsi kompleks.
-    order : int
-        Orde deret Taylor (1 = linear, 2 = kuadrat, dst.)
-    do_subs : dict (optional)
-        Substitusi nilai numerik, mis. {'lam': 3e-5}.
-
-    Returns
-    -------
-    dict dengan:
-        - 't_expression' : solusi simbolik utama (yang realistis)
-        - 't_value' : solusi numerik (jika do_subs diberikan)
-        - 'R_series' : ekspansi Taylor R(t)
-        - 'R_expr' : ekspresi asli R(t)
-    """
-    t, R = sp.symbols('t R')
-
-    # Deteksi simbol lambda dan variabel lain
+    # Deteksi simbol lambda
     local_names = {'t': t, 'R': R, 'exp': sp.exp}
     found = set(re.findall(r'lam[A-Za-z0-9_]*', R_t_str))
     if 'lam' in R_t_str and 'lam' not in found:
         found.add('lam')
     found.update(set(re.findall(r'[A-Z]', R_t_str)))
     for name in found:
-        local_names[name] = sp.symbols(name)
+        local_names[name] = sp.symbols(name, positive=True)
 
-    # Parse ekspresi
+    # Parse
     expr_str = R_t_str.replace('^', '**').replace('\n', '').strip()
     R_expr = sp.sympify(expr_str, locals=local_names)
 
-    # Deret Taylor sekitar t=0
+    # Taylor series
     R_series = sp.series(R_expr, t, 0, order + 1).removeO().expand()
 
-    # Pecahkan R_series == R untuk t
-    sols = sp.solve(sp.Eq(R_series, R), t)
+    # Solve R_series = R untuk t
+    eq = sp.Eq(R_series, R)
+    sols = sp.solve(eq, t)
 
-    # Pilih solusi yang paling "masuk akal": real, positif, kecil untuk R≈1
+    # === PILIH SOLUSI POSITIF TERKECIL ===
     best_sol = None
     min_pos_val = float('inf')
+
     for s in sols:
         try:
-            s_num = s.subs({R: r_target})     # Tetap simbolik dulu
-            if s_num.is_real:                 # Cek: apakah hasilnya real?
-                val = float(s_num)            # Baru konversi
-                if val > 1e-12 and val < min_pos_val:
+            s_num = s.subs(R, r_target)
+            if s_num.is_real:
+                val = float(s_num)
+                if val > 1e-12 and val < min_pos_val:  # positif & terkecil
                     min_pos_val = val
                     best_sol = s
         except:
-            pass
+            continue
 
-
+    # Fallback: jika tidak ada positif, coba yang real dan absolut terkecil
+    if best_sol is None:
+        min_abs = float('inf')
+        for s in sols:
+            try:
+                s_num = s.subs(R, r_target)
+                if s_num.is_real:
+                    val = float(s_num)
+                    if abs(val) < min_abs:
+                        min_abs = abs(val)
+                        best_sol = s
+            except:
+                continue
 
     if best_sol is None and sols:
         best_sol = sols[0]
 
-    # Substitusi numerik jika diminta
-    t_chosen_subs = None
+    # Substitusi numerik
+    t_value = None
     if do_subs and best_sol is not None:
         try:
-            t_chosen_subs = sp.simplify(best_sol.subs(do_subs))
-        except Exception:
-            t_chosen_subs = None
+            # Gabungkan do_subs dan R
+            full_subs = do_subs.copy()
+            full_subs[R] = r_target
+            t_value = float(best_sol.subs(full_subs))
+            if t_value < 0:
+                t_value = None  # tolak negatif
+        except:
+            t_value = None
 
     return {
         't_expression': best_sol,
-        't_value': t_chosen_subs
+        't_value': t_value,
     }
 
 @app.route('/calculate_hazard', methods=['POST'])
