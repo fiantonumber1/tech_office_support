@@ -211,62 +211,148 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
     }
 
 
-def invert_by_low_order_taylor(R_t_str, order=2, do_subs=None):
-    t, R = sp.symbols('t R', positive=True)
+def invert_by_low_order_taylor(r_target,R_t_str, order=2, do_subs=None):
+    """
+    Membalik R(t) menjadi t(R) dengan pendekatan deret Taylor orde rendah.
+
+    Parameters
+    ----------
+    R_t_str : str
+        Fungsi reliabilitas, mis. "exp(-lam*t)" atau fungsi kompleks.
+    order : int
+        Orde deret Taylor (1 = linear, 2 = kuadrat, dst.)
+    do_subs : dict (optional)
+        Substitusi nilai numerik, mis. {'lam': 3e-5}.
+
+    Returns
+    -------
+    dict dengan:
+        - 't_chosen' : solusi simbolik utama (yang realistis)
+        - 't_chosen_subs' : solusi numerik (jika do_subs diberikan)
+        - 'R_series' : ekspansi Taylor R(t)
+        - 'R_expr' : ekspresi asli R(t)
+    """
+    t, R = sp.symbols('t R')
+
+    # Deteksi simbol lambda dan variabel lain
     local_names = {'t': t, 'R': R, 'exp': sp.exp}
-    
-    # Deteksi semua lambda
     found = set(re.findall(r'lam[A-Za-z0-9_]*', R_t_str))
     if 'lam' in R_t_str and 'lam' not in found:
         found.add('lam')
+    found.update(set(re.findall(r'[A-Z]', R_t_str)))
     for name in found:
-        local_names[name] = sp.symbols(name, positive=True)
+        local_names[name] = sp.symbols(name)
 
+    # Parse ekspresi
     expr_str = R_t_str.replace('^', '**').replace('\n', '').strip()
     R_expr = sp.sympify(expr_str, locals=local_names)
-    R_series = sp.series(R_expr, t, 0, order + 1).removeO()
 
-    eq = sp.Eq(R_series, R)
-    sols = sp.solve(eq, t)
+    # Deret Taylor sekitar t=0
+    R_series = sp.series(R_expr, t, 0, order + 1).removeO().expand()
 
-    # Filter solusi real dan positif
-    positive_sols = []
+    # Pecahkan R_series == R untuk t
+    sols = sp.solve(sp.Eq(R_series, R), t)
+
+    # Pilih solusi yang paling "masuk akal": real, positif, kecil untuk R≈1
+    best_sol = None
+    min_abs_val = float('inf')
+    test_R = 0.99
     for s in sols:
         try:
-            if s.is_real:
-                test_val = s.subs(R, 0.99)
-                if test_val > 0:
-                    positive_sols.append(s)
-        except:
+            s_val = s.subs({R: test_R})
+            if s_val.is_real and s_val > 0:
+                abs_val = abs(s_val)
+                if abs_val < min_abs_val:
+                    min_abs_val = abs_val
+                    best_sol = s
+        except Exception:
             pass
+    if best_sol is None and sols:
+        best_sol = sols[0]
 
-    if not positive_sols:
-        positive_sols = [s for s in sols if s.is_real]
-
-    if not positive_sols:
-        best_sol = None
-    else:
-        best_sol = min(positive_sols, key=lambda s: float(s.subs(R, 0.99).evalf()))
-
+    # Substitusi numerik jika diminta
     t_chosen_subs = None
     if do_subs and best_sol is not None:
         try:
-            # Pastikan R ada di do_subs
-            if "R" not in do_subs:
-                do_subs = {**do_subs, R: 0.9}
-            expr_num = best_sol.subs(do_subs)
-            t_val = expr_num.evalf()
-            if t_val.is_real and float(t_val) > 0:
-                t_chosen_subs = float(t_val)
-        except Exception as e:
-            print(f"Numerical evaluation failed: {e}")
+            t_chosen_subs = sp.simplify(best_sol.subs(do_subs))
+        except Exception:
             t_chosen_subs = None
 
     return {
         't_chosen': best_sol,
-        't_chosen_subs': t_chosen_subs,
-        'R_series': R_series,
-        'R_expr': R_expr
+        't_chosen_subs': t_chosen_subs
+    }
+
+def invert_by_low_order_taylor(R_t_str, order=2, do_subs=None):
+    """
+    Membalik R(t) menjadi t(R) dengan pendekatan deret Taylor orde rendah.
+
+    Parameters
+    ----------
+    R_t_str : str
+        Fungsi reliabilitas, mis. "exp(-lam*t)" atau fungsi kompleks.
+    order : int
+        Orde deret Taylor (1 = linear, 2 = kuadrat, dst.)
+    do_subs : dict (optional)
+        Substitusi nilai numerik, mis. {'lam': 3e-5}.
+
+    Returns
+    -------
+    dict dengan:
+        - 't_chosen' : solusi simbolik utama (yang realistis)
+        - 't_chosen_subs' : solusi numerik (jika do_subs diberikan)
+        - 'R_series' : ekspansi Taylor R(t)
+        - 'R_expr' : ekspresi asli R(t)
+    """
+    t, R = sp.symbols('t R')
+
+    # Deteksi simbol lambda dan variabel lain
+    local_names = {'t': t, 'R': R, 'exp': sp.exp}
+    found = set(re.findall(r'lam[A-Za-z0-9_]*', R_t_str))
+    if 'lam' in R_t_str and 'lam' not in found:
+        found.add('lam')
+    found.update(set(re.findall(r'[A-Z]', R_t_str)))
+    for name in found:
+        local_names[name] = sp.symbols(name)
+
+    # Parse ekspresi
+    expr_str = R_t_str.replace('^', '**').replace('\n', '').strip()
+    R_expr = sp.sympify(expr_str, locals=local_names)
+
+    # Deret Taylor sekitar t=0
+    R_series = sp.series(R_expr, t, 0, order + 1).removeO().expand()
+
+    # Pecahkan R_series == R untuk t
+    sols = sp.solve(sp.Eq(R_series, R), t)
+
+    # Pilih solusi yang paling "masuk akal": real, positif, kecil untuk R≈1
+    best_sol = None
+    min_abs_val = float('inf')
+    test_R = 0.99
+    for s in sols:
+        try:
+            s_val = s.subs({R: test_R})
+            if s_val.is_real and s_val > 0:
+                abs_val = abs(s_val)
+                if abs_val < min_abs_val:
+                    min_abs_val = abs_val
+                    best_sol = s
+        except Exception:
+            pass
+    if best_sol is None and sols:
+        best_sol = sols[0]
+
+    # Substitusi numerik jika diminta
+    t_chosen_subs = None
+    if do_subs and best_sol is not None:
+        try:
+            t_chosen_subs = sp.simplify(best_sol.subs(do_subs))
+        except Exception:
+            t_chosen_subs = None
+
+    return {
+        't_chosen': best_sol,
+        't_chosen_subs': t_chosen_subs
     }
 
 @app.route('/calculate_hazard', methods=['POST'])
