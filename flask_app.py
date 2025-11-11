@@ -209,31 +209,51 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
         "method": method
     }
 
+
+
 def invert_by_low_order_taylor(r_target, R_t_str, order=2, do_subs=None):
-    t, R = sp.symbols('t R', positive=True)  # t dan R positif
+    """
+    Inversi R(t) → t menggunakan Taylor orde rendah.
+    Mendukung do_subs dengan string key → otomatis konversi ke Symbol.
+    """
+    t, R = sp.symbols('t R', positive=True)
 
-    # Deteksi simbol lambda
+    # === 1. DETEKSI SEMUA SIMBOL (lambda + huruf kapital) ===
     local_names = {'t': t, 'R': R, 'exp': sp.exp}
-    found = set(re.findall(r'lam[A-Za-z0-9_]*', R_t_str))
-    if 'lam' in R_t_str and 'lam' not in found:
-        found.add('lam')
-    found.update(set(re.findall(r'[A-Z]', R_t_str)))
+    found_lam = set(re.findall(r'lam[A-Za-z0-9_]*', R_t_str))
+    if 'lam' in R_t_str and not found_lam:
+        found_lam.add('lam')
+    found_caps = set(re.findall(r'[A-Z][A-Za-z0-9_]*', R_t_str))
+    found = found_lam.union(found_caps)
+
+    # Simpan mapping string → Symbol
+    symbol_map = {}
     for name in found:
-        local_names[name] = sp.symbols(name, positive=True)
+        sym = sp.symbols(name, positive=True)
+        local_names[name] = sym
+        symbol_map[name] = sym
 
-    # Parse
+    # === 2. PARSE R(t) ===
     expr_str = R_t_str.replace('^', '**').replace('\n', '').strip()
-    R_expr = sp.sympify(expr_str, locals=local_names)
+    try:
+        R_expr = sp.sympify(expr_str, locals=local_names)
+    except Exception as e:
+        raise ValueError(f"Parse error: {e}")
 
-    # Taylor series
-    R_series = sp.series(R_expr, t, 0, order + 1).removeO().expand()
+    # === 3. TAYLOR SERIES di t=0 ===
+    try:
+        R_series = sp.series(R_expr, t, 0, order + 1).removeO().expand()
+    except Exception as e:
+        raise ValueError(f"Taylor error: {e}")
 
-    # Solve R_series = R untuk t
+    # === 4. SOLVE R_series = R untuk t ===
     eq = sp.Eq(R_series, R)
-    sols = sp.solve(eq, t)
+    try:
+        sols = sp.solve(eq, t)
+    except:
+        sols = []
 
-    # === PILIH SOLUSI POSITIF TERKECIL ===
-    # Pilih solusi POSITIF (sudah benar)
+    # === 5. PILIH SOLUSI POSITIF TERKECIL ===
     best_sol = None
     min_pos_val = float('inf')
     for s in sols:
@@ -246,34 +266,46 @@ def invert_by_low_order_taylor(r_target, R_t_str, order=2, do_subs=None):
                     best_sol = s
         except:
             continue
-    
+
     if best_sol is None and sols:
         best_sol = sols[0]
 
-    # === SUBSTITUSI NUMERIK YANG PALING AMAN ===
+    # === 6. SUBSTITUSI NUMERIK AMAN ===
     t_value = None
-    if do_subs and best_sol is not None:
+    if do_subs is not None and best_sol is not None:
         try:
-            full_subs = do_subs.copy()
-            full_subs[R] = r_target
-            
+            # Bangun full_subs: string → Symbol otomatis
+            full_subs = {}
+            for k, v in do_subs.items():
+                if isinstance(k, str) and k in symbol_map:
+                    full_subs[symbol_map[k]] = v
+                else:
+                    full_subs[k] = v
+            full_subs[R] = r_target  # R pasti Symbol
+
+            # DEBUG (bisa dihapus di produksi)
             print(f"[DEBUG] full_subs: {full_subs}")
             print(f"[DEBUG] best_sol: {best_sol}")
 
-            # Langkah 1: Substitusi
-            substituted = best_sol.subs(full_subs)
-            print(f"[DEBUG] setelah subs: {substituted}")
+            # Substitusi
+            expr = best_sol.subs(full_subs)
+            print(f"[DEBUG] setelah subs: {expr}")
 
-            # Langkah 2: evalf
-            evalfed = substituted.evalf()
-            print(f"[DEBUG] setelah evalf(): {evalfed} (tipe: {type(evalfed)})")
-
-            # Langkah 3: Cek apakah bisa jadi float
-            if evalfed.is_real and evalfed.is_finite:
-                t_value = float(evalfed)
-                print(f"[DEBUG] t_value: {t_value}")
+            # Cek apakah masih ada simbol
+            free_syms = expr.free_symbols
+            if free_syms:
+                print(f"[ERROR] Simbol belum diganti: {free_syms}")
+                t_value = None
             else:
-                print(f"[DEBUG] Gagal: bukan real/finite → {evalfed}")
+                ev = expr.evalf()
+                print(f"[DEBUG] evalf(): {ev} (type: {type(ev)})")
+
+                if ev.is_real and ev.is_finite:
+                    t_value = float(ev)
+                    print(f"[SUCCESS] t_value: {t_value}")
+                else:
+                    print(f"[ERROR] Hasil tidak real/finite: {ev}")
+                    t_value = None
 
         except Exception as e:
             print(f"Subs error: {e}")
@@ -283,7 +315,7 @@ def invert_by_low_order_taylor(r_target, R_t_str, order=2, do_subs=None):
 
     return {
         't_expression': best_sol,
-        't_value': t_value  # PASTI float atau None
+        't_value': t_value  # float atau None
     }
 
 
