@@ -210,8 +210,6 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
         "method": method
     }
 
-
-
 def invert_by_low_order_taylor(r_target,R_t_str, order=2, do_subs=None):
     """
     Membalik R(t) menjadi t(R) dengan pendekatan deret Taylor orde rendah.
@@ -228,8 +226,8 @@ def invert_by_low_order_taylor(r_target,R_t_str, order=2, do_subs=None):
     Returns
     -------
     dict dengan:
-        - 't_chosen' : solusi simbolik utama (yang realistis)
-        - 't_chosen_subs' : solusi numerik (jika do_subs diberikan)
+        - 't_expression' : solusi simbolik utama (yang realistis)
+        - 't_value' : solusi numerik (jika do_subs diberikan)
         - 'R_series' : ekspansi Taylor R(t)
         - 'R_expr' : ekspresi asli R(t)
     """
@@ -280,8 +278,8 @@ def invert_by_low_order_taylor(r_target,R_t_str, order=2, do_subs=None):
             t_chosen_subs = None
 
     return {
-        't_chosen': best_sol,
-        't_chosen_subs': t_chosen_subs
+        't_expression': best_sol,
+        't_value': t_chosen_subs
     }
 
 @app.route('/calculate_hazard', methods=['POST'])
@@ -335,8 +333,8 @@ def calc_t_r():
             subs_dict["R"] = r_target_to_find_t
             try:
                 inv = invert_by_low_order_taylor(0.9,fungsi, order=ordo, do_subs=subs_dict)
-                result['t_expression'] = str(inv['t_chosen'])
-                result['t_value'] = float(inv['t_chosen_subs'])
+                result['t_expression'] = str(inv['t_expression'])
+                result['t_value'] = float(inv['t_value'])
             except Exception as e_inv:
                 result['t_for_R'] = {
                     'R_target': r_target_to_find_t,
