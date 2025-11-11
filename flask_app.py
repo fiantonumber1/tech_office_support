@@ -212,44 +212,54 @@ def calculate_reliability(fungsi_str, lambdas, t_values):
 
 
 def invert_by_low_order_taylor(R_t_str, order=2, do_subs=None):
-    t, R = sp.symbols('t R', positive=True)  # <--- tambahkan positive=True
+    t, R = sp.symbols('t R', positive=True)
     local_names = {'t': t, 'R': R, 'exp': sp.exp}
     
-    # Deteksi lambda
+    # Deteksi semua lambda
     found = set(re.findall(r'lam[A-Za-z0-9_]*', R_t_str))
     if 'lam' in R_t_str and 'lam' not in found:
         found.add('lam')
     for name in found:
-        local_names[name] = sp.symbols(name, positive=True)  # <--- lambda > 0
+        local_names[name] = sp.symbols(name, positive=True)
 
     expr_str = R_t_str.replace('^', '**').replace('\n', '').strip()
     R_expr = sp.sympify(expr_str, locals=local_names)
-
     R_series = sp.series(R_expr, t, 0, order + 1).removeO()
+
     eq = sp.Eq(R_series, R)
     sols = sp.solve(eq, t)
 
-    # PILIH SOLUSI POSITIF DAN REAL
-    positive_sols = [s for s in sols if s.is_real and s.subs(R, 0.99) > 0]
-    
+    # Filter solusi real dan positif
+    positive_sols = []
+    for s in sols:
+        try:
+            if s.is_real:
+                test_val = s.subs(R, 0.99)
+                if test_val > 0:
+                    positive_sols.append(s)
+        except:
+            pass
+
     if not positive_sols:
-        # Fallback: ambil yang paling mendekati positif
         positive_sols = [s for s in sols if s.is_real]
-    
+
     if not positive_sols:
-        best_sol = sols[0] if sols else None
+        best_sol = None
     else:
-        # Pilih yang paling kecil (waktu terkecil untuk R=0.99)
-        best_sol = min(positive_sols, key=lambda s: abs(float(s.subs(R, 0.99))))
+        best_sol = min(positive_sols, key=lambda s: float(s.subs(R, 0.99).evalf()))
 
     t_chosen_subs = None
     if do_subs and best_sol is not None:
         try:
-            full_subs = {**do_subs, R: do_subs.get("R", 0.9)}
-            t_chosen_subs = float(best_sol.subs(full_subs))
-            if t_chosen_subs < 0:
-                t_chosen_subs = None  # tolak negatif
-        except:
+            # Pastikan R ada di do_subs
+            if "R" not in do_subs:
+                do_subs = {**do_subs, R: 0.9}
+            expr_num = best_sol.subs(do_subs)
+            t_val = expr_num.evalf()
+            if t_val.is_real and float(t_val) > 0:
+                t_chosen_subs = float(t_val)
+        except Exception as e:
+            print(f"Numerical evaluation failed: {e}")
             t_chosen_subs = None
 
     return {
