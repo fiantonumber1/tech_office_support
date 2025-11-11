@@ -332,7 +332,7 @@ def calc_t_r():
             subs_dict = lambdas.copy()
             subs_dict["R"] = r_target_to_find_t
             try:
-                inv = invert_by_low_order_taylor(0.9,fungsi, order=ordo, do_subs=subs_dict)
+                inv = invert_by_low_order_taylor(r_target_to_find_t,fungsi, order=ordo, do_subs=subs_dict)
                 result['t_expression'] = str(inv['t_expression'])
                 result['t_value'] = float(inv['t_value'])
             except Exception as e_inv:
