@@ -36,7 +36,6 @@ def safe_expand(expr, timeout=15):
         print(f"Expand error: {e}. Using original.")
         return expr
 
-
 def calculate_reliability(fungsi_str, lambdas, t_values):
     t = sp.symbols('t')
     lam_symbols = {name: sp.symbols(name) for name in lambdas.keys()}
@@ -254,18 +253,20 @@ def invert_by_low_order_taylor(r_target,R_t_str, order=2, do_subs=None):
 
     # Pilih solusi yang paling "masuk akal": real, positif, kecil untuk R≈1
     best_sol = None
-    min_abs_val = float('inf')
-    test_R = r_target
+    min_pos_val = float('inf')
     for s in sols:
         try:
-            s_val = s.subs({R: test_R})
-            if s_val.is_real and s_val > 0:
-                abs_val = abs(s_val)
-                if abs_val < min_abs_val:
-                    min_abs_val = abs_val
+            s_num = s.subs({R: r_target})     # Tetap simbolik dulu
+            if s_num.is_real:                 # Cek: apakah hasilnya real?
+                val = float(s_num)            # Baru konversi
+                if val > 1e-12 and val < min_pos_val:
+                    min_pos_val = val
                     best_sol = s
-        except Exception:
+        except:
             pass
+
+
+
     if best_sol is None and sols:
         best_sol = sols[0]
 
@@ -346,8 +347,6 @@ def calc_t_r():
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5632, debug=True)
