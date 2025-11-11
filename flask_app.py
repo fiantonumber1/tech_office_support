@@ -256,15 +256,36 @@ def invert_by_low_order_taylor(r_target, R_t_str, order=2, do_subs=None):
         try:
             full_subs = do_subs.copy()
             full_subs[R] = r_target
-            t_value = float(best_sol.subs(full_subs).evalf())
+            
+            print(f"[DEBUG] full_subs: {full_subs}")
+            print(f"[DEBUG] best_sol: {best_sol}")
+
+            # Langkah 1: Substitusi
+            substituted = best_sol.subs(full_subs)
+            print(f"[DEBUG] setelah subs: {substituted}")
+
+            # Langkah 2: evalf
+            evalfed = substituted.evalf()
+            print(f"[DEBUG] setelah evalf(): {evalfed} (tipe: {type(evalfed)})")
+
+            # Langkah 3: Cek apakah bisa jadi float
+            if evalfed.is_real and evalfed.is_finite:
+                t_value = float(evalfed)
+                print(f"[DEBUG] t_value: {t_value}")
+            else:
+                print(f"[DEBUG] Gagal: bukan real/finite → {evalfed}")
+
         except Exception as e:
             print(f"Subs error: {e}")
+            import traceback
+            traceback.print_exc()
             t_value = None
 
     return {
         't_expression': best_sol,
         't_value': t_value  # PASTI float atau None
     }
+
 
 @app.route('/calculate_hazard', methods=['POST'])
 def calc():
