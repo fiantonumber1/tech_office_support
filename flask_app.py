@@ -233,53 +233,37 @@ def invert_by_low_order_taylor(r_target, R_t_str, order=2, do_subs=None):
     sols = sp.solve(eq, t)
 
     # === PILIH SOLUSI POSITIF TERKECIL ===
+    # Pilih solusi POSITIF (sudah benar)
     best_sol = None
     min_pos_val = float('inf')
-
     for s in sols:
         try:
             s_num = s.subs(R, r_target)
             if s_num.is_real:
                 val = float(s_num)
-                if val > 1e-12 and val < min_pos_val:  # positif & terkecil
+                if val > 1e-12 and val < min_pos_val:
                     min_pos_val = val
                     best_sol = s
         except:
             continue
-
-    # Fallback: jika tidak ada positif, coba yang real dan absolut terkecil
-    if best_sol is None:
-        min_abs = float('inf')
-        for s in sols:
-            try:
-                s_num = s.subs(R, r_target)
-                if s_num.is_real:
-                    val = float(s_num)
-                    if abs(val) < min_abs:
-                        min_abs = abs(val)
-                        best_sol = s
-            except:
-                continue
-
+    
     if best_sol is None and sols:
         best_sol = sols[0]
 
-    # Substitusi numerik
+    # === SUBSTITUSI NUMERIK YANG PALING AMAN ===
     t_value = None
     if do_subs and best_sol is not None:
         try:
-            # Gabungkan do_subs dan R
             full_subs = do_subs.copy()
             full_subs[R] = r_target
-            t_value = float(best_sol.subs(full_subs))
-            if t_value < 0:
-                t_value = None  # tolak negatif
-        except:
+            t_value = float(best_sol.subs(full_subs).evalf())
+        except Exception as e:
+            print(f"Subs error: {e}")
             t_value = None
 
     return {
         't_expression': best_sol,
-        't_value': t_value,
+        't_value': t_value  # PASTI float atau None
     }
 
 @app.route('/calculate_hazard', methods=['POST'])
