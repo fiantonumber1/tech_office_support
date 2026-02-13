@@ -33,12 +33,23 @@ def compute_fft_plot(signal, sampling_rate):
 
     N = len(signal)
 
-    yf = fft(signal)
+    # =========================
+    # APPLY HANNING WINDOW
+    # =========================
+    window = np.hanning(N)
+    windowed_signal = signal * window
+
+    # =========================
+    # FFT
+    # =========================
+    yf = fft(windowed_signal)
     xf = np.fft.fftfreq(N, 1/sampling_rate)
 
+    amplitude = (2.0 / N) * np.abs(yf[:N//2])
+
     plt.figure(figsize=(8,4))
-    plt.plot(xf[:N//2], np.abs(yf[:N//2]))
-    plt.title("FFT Spectrum")
+    plt.plot(xf[:N//2], amplitude)
+    plt.title("FFT Spectrum (Hanning Window Applied)")
     plt.xlabel("Frequency (Hz)")
     plt.ylabel("Amplitude")
     plt.grid(True)
@@ -51,3 +62,26 @@ def compute_fft_plot(signal, sampling_rate):
     plt.close()
 
     return image_base64
+
+
+def compute_time_plot(signal, sampling_rate):
+
+    N = len(signal)
+    t = np.arange(N) / sampling_rate
+
+    plt.figure(figsize=(8,4))
+    plt.plot(t, signal)
+    plt.title("Time Domain Signal")
+    plt.xlabel("Time (seconds)")
+    plt.ylabel("Amplitude")
+    plt.grid(True)
+
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+
+    image_base64 = base64.b64encode(buf.read()).decode('utf-8')
+    plt.close()
+
+    return image_base64
+
