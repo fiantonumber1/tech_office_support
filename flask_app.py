@@ -4,6 +4,7 @@ import pandas as pd
 import re
 import os
 from werkzeug.utils import secure_filename
+from signal_processing import compute_features, compute_fft_plot
 
 app = Flask(__name__)
 
@@ -11,6 +12,31 @@ UPLOAD_DIR = "uploaded_files"
 BASE_PUBLIC_URL = "http://147.93.103.168:5632/files"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 API_KEY = "SUPER_SECRET_KEY"
+
+
+## FFT - Signal Processing
+@app.route('/fft', methods=['POST'])
+def compute_fft():
+
+    file = request.files['file']
+    sampling_rate = float(request.form.get('sampling_rate', 1000))
+
+    # =====================
+    # READ EXCEL
+    # =====================
+    df = pd.read_excel(file)
+    signal = df.iloc[:,1].dropna().astype(float).values
+
+    # =====================
+    # CALL PROCESSING MODULE
+    # =====================
+    features = compute_features(signal)
+    image_base64 = compute_fft_plot(signal, sampling_rate)
+
+    return jsonify({
+        "image": image_base64,
+        "features": features
+    })
 
 def format_scientific(val):
     if val == 0 or abs(val) < 1e-40:
