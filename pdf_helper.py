@@ -65,3 +65,21 @@ def append_signature_page(pdf_file, signature_b64):
     output_pdf.seek(0)
 
     return output_pdf
+
+# pdf_helper.py — tambahkan fungsi ini
+def get_original_page_count(pdf_file):
+    pdf_file.seek(0)
+    reader = PdfReader(pdf_file)
+    return len(reader.pages)
+
+
+def strip_last_page(pdf_data: bytes) -> bytes:
+    """Buang halaman terakhir (halaman QR signature) dari PDF."""
+    reader = PdfReader(io.BytesIO(pdf_data))
+    writer = PdfWriter()
+    for page in reader.pages[:-1]:  # semua kecuali halaman terakhir
+        writer.add_page(page)
+    output = io.BytesIO()
+    writer.write(output)
+    output.seek(0)
+    return output.read()

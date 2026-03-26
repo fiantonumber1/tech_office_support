@@ -6,7 +6,7 @@ import os
 from werkzeug.utils import secure_filename
 from signal_processing import compute_features, compute_fft_plot, compute_time_plot
 from crypto_helper import hash_file_data, generate_rsa_keys, sign_data, verify_signature
-from pdf_helper import append_signature_page
+from pdf_helper import append_signature_page, strip_last_page
 
 app = Flask(__name__)
 
@@ -501,26 +501,27 @@ def sign_pdf_route():
 @app.route('/verify', methods=['POST'])
 def verify_pdf_route():
     if 'file' not in request.files or 'signature' not in request.form or 'public_key' not in request.form:
-        return jsonify({"error": "Data tidak lengkap! Butuh file, signature, dan public_key."}), 400
+        return jsonify({"error": "Data tidak lengkap!"}), 400
 
     pdf_file = request.files['file']
     if not pdf_file.filename.lower().endswith('.pdf'):
-        return jsonify({"error": "Hanya menerima dokumen PDF untuk dicek."}), 400
+        return jsonify({"error": "Hanya menerima dokumen PDF."}), 400
 
     raw_public_key = request.form['public_key'].replace('\\n', '\n')
     public_key_pem = raw_public_key.encode('utf-8')
-    signature_b64 = request.form['signature'].strip() 
+    signature_b64 = request.form['signature'].strip()
 
     pdf_data = pdf_file.read()
-    file_hash = hash_file_data(pdf_data)
+    
+    # ✅ FIX: Buang halaman QR (terakhir) sebelum hashing
+    original_pdf_data = strip_last_page(pdf_data)
+    file_hash = hash_file_data(original_pdf_data)
     
     try:
         verify_signature(signature_b64, file_hash, public_key_pem)
         return jsonify({"status": "valid", "message": "Dokumen ASLI dan tidak ada perubahan."})
     except Exception as e:
-        print(f"[ERROR VERIFY] Percobaan gagal: {str(e)}")
         return jsonify({"status": "invalid", "message": "PALSU! Dokumen telah diedit atau kunci salah."})
-
 
 
 # =====================================================
