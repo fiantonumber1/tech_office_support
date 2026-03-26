@@ -7,6 +7,7 @@ from werkzeug.utils import secure_filename
 from signal_processing import compute_features, compute_fft_plot, compute_time_plot
 from crypto_helper import hash_file_data, generate_rsa_keys, sign_data, verify_signature
 from pdf_helper import append_signature_page, strip_last_page
+import io
 
 app = Flask(__name__)
 
