@@ -6,7 +6,7 @@ import os
 from werkzeug.utils import secure_filename
 from signal_processing import compute_features, compute_fft_plot, compute_time_plot
 from crypto_helper import hash_file_data, generate_rsa_keys, sign_data, verify_signature
-from pdf_helper import append_signature_page, strip_last_page
+from pdf_helper import append_signature_page, strip_last_page,get_original_hash_from_pdf
 import io
 
 app = Flask(__name__)
@@ -478,10 +478,13 @@ def sign_pdf_route():
     if not pdf_file.filename.lower().endswith('.pdf'):
         return jsonify({"error": "Format file ditolak! Hanya menerima dokumen PDF."}), 400
  
+    # ✅ Simpan nama file SEBELUM .read()
+    original_filename = os.path.splitext(pdf_file.filename)[0]
+    download_filename = f"{original_filename}_signed.pdf"
+
     raw_private_key = request.form['private_key'].replace('\\n', '\n')
     private_key_pem = raw_private_key.encode('utf-8')
  
-    # ✅ Baca bytes asli SEKALI, hash dari bytes mentah ini
     pdf_data = pdf_file.read()
     file_hash = hash_file_data(pdf_data)
     original_hash_hex = file_hash.hex()
@@ -497,17 +500,16 @@ def sign_pdf_route():
         print(f"[ERROR SIGNING] Kunci salah atau rusak: {str(e)}")
         return jsonify({"error": "Private Key tidak valid atau format rusak!"}), 400
  
-    # ✅ Pass original_hash_hex ke append_signature_page agar tersimpan di metadata
     output_pdf = append_signature_page(
         io.BytesIO(pdf_data),
         signature_b64,
         original_hash_hex=original_hash_hex
     )
  
-    response = send_file(output_pdf, mimetype='application/pdf', as_attachment=True, download_name='signed_document.pdf')
+    # ✅ Pakai nama file asli
+    response = send_file(output_pdf, mimetype='application/pdf', as_attachment=True, download_name=download_filename)
     response.headers['X-Signature'] = signature_b64
     return response
- 
  
 @app.route('/verify', methods=['POST'])
 def verify_pdf_route():
