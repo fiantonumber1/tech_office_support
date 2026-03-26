@@ -478,9 +478,13 @@ def sign_pdf_route():
     if not pdf_file.filename.lower().endswith('.pdf'):
         return jsonify({"error": "Format file ditolak! Hanya menerima dokumen PDF."}), 400
  
-    # ✅ Simpan nama file SEBELUM .read()
-    original_filename = os.path.splitext(pdf_file.filename)[0]
-    download_filename = f"{original_filename}_signed.pdf"
+    # ✅ Pertahankan nama file asli, fallback ke 'signed_document' kalau gagal
+    try:
+        raw_name = pdf_file.filename or "signed_document"
+        original_filename = os.path.splitext(secure_filename(raw_name))[0] or "signed_document"
+        download_filename = f"{original_filename}_signed.pdf"
+    except Exception:
+        download_filename = "signed_document.pdf"
 
     raw_private_key = request.form['private_key'].replace('\\n', '\n')
     private_key_pem = raw_private_key.encode('utf-8')
@@ -506,11 +510,11 @@ def sign_pdf_route():
         original_hash_hex=original_hash_hex
     )
  
-    # ✅ Pakai nama file asli
+    print(f"[DEBUG] download_filename: {download_filename}")
     response = send_file(output_pdf, mimetype='application/pdf', as_attachment=True, download_name=download_filename)
     response.headers['X-Signature'] = signature_b64
     return response
- 
+
 @app.route('/verify', methods=['POST'])
 def verify_pdf_route():
     if 'file' not in request.files or 'signature' not in request.form or 'public_key' not in request.form:
